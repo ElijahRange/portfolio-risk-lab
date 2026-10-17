@@ -29,6 +29,11 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   - historical-covariance risk contributions
   - historical VaR/CVaR, drawdown, effective N
   - PCA of position return correlations
+  - idiosyncratic risk (`Analysis.idio`): single-index market model of every name and the
+    book on the benchmark (SPX); systematic vs idiosyncratic return/variance, Newey-West
+    t-stats, residual covariance contributions and correlations, rolling 63-day split over
+    the full price history. Shown in the "Idiosyncratic Risk" tab (`views/idio.py`), whose
+    row-click detail panel is wired up in `app.py` (`select_idio_name`).
 - `dashboard/data.py`: reads the portfolio file (flexible column aliases; `CASH` row =
   dollars; negative quantity = short). Prices come from Yahoo's public chart endpoint and
   are cached per ticker as CSV in `data/cache/` for 12 hours.
