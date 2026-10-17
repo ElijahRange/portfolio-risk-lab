@@ -27,6 +27,7 @@ class Analysis:
     pca_labels: list[str]
     corr: pd.DataFrame
     idio: "IdioRisk"
+    history: pd.DataFrame            # full daily return history of the holdings + benchmark (for the optimizer)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -189,6 +190,12 @@ def _idiosyncratic(R: pd.DataFrame, bench: pd.Series, w: pd.Series, full: pd.Dat
                     cum_split=cum_split, rolling=rolling)
 
 
+def _history(full_rets: pd.DataFrame, tickers: list[str], benchmark: str) -> pd.DataFrame:
+    """Daily returns of the holdings and benchmark, minus market-holiday rows (forward-filled, all zero)."""
+    h = full_rets[tickers + [benchmark]].fillna(0.0)
+    return h[(h != 0).any(axis=1)]
+
+
 def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: list[str],
           benchmark: str = config.BENCHMARK) -> Analysis:
     warnings = []
@@ -290,6 +297,7 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
     if not pca_points.empty:
         pca_points["side"] = pca_points["ticker"].map(h.set_index("ticker")["side"])
 
+    full_rets = prices.pct_change(fill_method=None).iloc[1:]
     top = w.abs().sort_values(ascending=False).head(15).index
     return Analysis(
         as_of=prices.index[-1],
@@ -305,6 +313,7 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
         pca_points=pca_points,
         pca_labels=pca_labels,
         corr=R[top].corr(),
-        idio=_idiosyncratic(R, bench.rename(benchmark), w, prices.pct_change(fill_method=None).iloc[1:], nav),
+        idio=_idiosyncratic(R, bench.rename(benchmark), w, full_rets, nav),
+        history=_history(full_rets, list(w.index), benchmark),
         warnings=warnings,
     )

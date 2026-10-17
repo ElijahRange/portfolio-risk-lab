@@ -60,3 +60,8 @@ ROLLING_BETA_DAYS = 63     # about one quarter
 PRICE_HISTORY_RANGE = "2y"
 PRICE_CACHE_MAX_AGE_HOURS = 12
 MIN_HISTORY_COVERAGE = 0.6  # drop tickers with less than 60% of the lookback window
+
+# Ratio Testing page (portfolio optimizer + efficient frontier).
+RISK_FREE_RATE = 0.04            # annual; default for Sharpe/Sortino, editable on the page
+OPT_LOOKBACKS = {"1Y": 252, "3Y": 756, "Full": None}  # None = all history in the price file
+FRONTIER_POINTS = 30

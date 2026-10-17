@@ -7,7 +7,7 @@ from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
 from dashboard import config, service, theme  # noqa: F401  (theme registers the Plotly template)
-from dashboard.views import factors, idio, notes, overview, risk
+from dashboard.views import factors, idio, notes, overview, ratio_testing, risk
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
@@ -29,7 +29,8 @@ TABS = {
     "idio": ("Idiosyncratic Risk", idio),
     "risk": ("Risk Analysis", risk),
 }
-PAGES = {"/": "Portfolio", "/notes": "Model notes"}
+PAGES = {"/": "Portfolio", "/ratio-testing": "Ratio Testing", "/notes": "Model notes"}
+NAV_IDS = {path: f"nav-{label.lower().replace(' ', '-')}" for path, label in PAGES.items()}
 
 
 def nav_link(label, href):
@@ -42,6 +43,7 @@ sidebar = html.Aside([
     html.Nav([
         html.Div("Workspace", className="nav-group"),
         nav_link("Portfolio", "/"),
+        nav_link("Ratio Testing", "/ratio-testing"),
         html.Div("Reference", className="nav-group"),
         nav_link("Model notes", "/notes"),
     ]),
@@ -77,12 +79,20 @@ app.layout = html.Div([
 
 
 @app.callback(Output("page", "children"), Output("header-title", "children"),
-              Output("nav-portfolio", "className"), Output("nav-model-notes", "className"),
+              *[Output(nav_id, "className") for nav_id in NAV_IDS.values()],
               Input("url", "pathname"))
 def route(pathname):
     pathname = pathname if pathname in PAGES else "/"
     active = ["nav-link active" if p == pathname else "nav-link" for p in PAGES]
-    page = notes.layout() if pathname == "/notes" else portfolio_page()
+    if pathname == "/notes":
+        page = notes.layout()
+    elif pathname == "/ratio-testing":
+        try:
+            page = ratio_testing.layout(service.current_analysis())
+        except Exception as exc:
+            page = ui.alert("Could not load the portfolio", f"{type(exc).__name__}: {exc}", "error")
+    else:
+        page = portfolio_page()
     return page, PAGES[pathname], *active
 
 
@@ -131,6 +141,55 @@ def select_idio_name(clicks, ids):
     except Exception:
         return no_update, no_update
     return detail, [idio._row_class(i["index"], ticker) for i in ids]
+
+
+# ---------- Ratio Testing page ----------
+
+RT_CONTROLS = [State("rt-lookback", "value"), State("rt-returns", "value"), State("rt-lo", "value"),
+               State("rt-hi", "value"), State("rt-rf", "value"), State("rt-beta-on", "value"), State("rt-beta", "value")]
+
+
+@app.callback(Output("rt-content", "children"),
+              Input("rt-tabs", "value"), Input("rt-objective", "value"),
+              *[Input(c.component_id, c.component_property) for c in RT_CONTROLS],
+              State("rt-custom-store", "data"))
+def render_ratio_testing(tab, objective, *args):
+    *controls, custom = args
+    try:
+        return ratio_testing.content(service.current_analysis(), tab, objective,
+                                     ratio_testing.settings_from(*controls), custom)
+    except Exception as exc:
+        return ui.alert("Could not run the optimizer", f"{type(exc).__name__}: {exc}", "error")
+
+
+@app.callback(Output("rt-frontier-graph", "figure"), Output("rt-custom-summary", "children"),
+              Output("rt-point-detail", "children"), Output("rt-custom-store", "data"),
+              Input({"type": "rt-w", "index": ALL}, "value"), Input("rt-frontier-graph", "clickData"),
+              State("rt-objective", "value"), *RT_CONTROLS, prevent_initial_call=True)
+def frontier_interact(values, click, objective, *controls):
+    try:
+        a = service.current_analysis()
+        r = ratio_testing.run(a, ratio_testing.settings_from(*controls))
+    except Exception:
+        return no_update, no_update, no_update, no_update
+    custom = ratio_testing._custom_weights(r, values)
+    if ctx.triggered_id == "rt-frontier-graph":
+        if not click or not click.get("points") or "customdata" not in click["points"][0]:
+            return no_update, no_update, no_update, no_update
+        return no_update, no_update, ratio_testing.point_detail(a, r, click["points"][0]["customdata"], custom), no_update
+    return (ratio_testing.frontier_figure(r, objective, custom), ratio_testing.custom_summary(r, values),
+            no_update, values)
+
+
+@app.callback(Output({"type": "rt-w", "index": ALL}, "value"), Input("rt-reset", "n_clicks"),
+              State({"type": "rt-w", "index": ALL}, "id"), prevent_initial_call=True)
+def reset_custom_weights(_, ids):
+    try:
+        w = service.current_analysis().positions.set_index("ticker")["weight"]
+    except Exception:
+        return [no_update] * len(ids)
+    w = w / w.sum()
+    return [round(float(w.get(i["index"], 0.0)) * 100, 1) for i in ids]
 
 
 if __name__ == "__main__":

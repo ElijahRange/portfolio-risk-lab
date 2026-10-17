@@ -21,6 +21,10 @@ def layout():
                     "market model). Beta × index is the systematic part; alpha + the leftover residual is the "
                     "stock-specific (idiosyncratic) part. R² is the share of variance the index explains. "
                     "t-stats use Newey–West standard errors."),
+            html.Li("Ratio testing: SciPy (SLSQP) searches for the weights of the current stocks that best meet a goal "
+                    "(max Sharpe, min volatility, min idiosyncratic risk, max Sortino, risk parity, max "
+                    "diversification) within the weight limits. The efficient frontier is the lowest-volatility "
+                    "mix for each level of expected return. All of it is fit on past returns (in-sample)."),
             html.Li("VaR (95%): the 1-day loss exceeded on only 5% of days in the window. "
                     "CVaR is the average loss on those worst days."),
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "

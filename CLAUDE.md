@@ -34,6 +34,11 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
     t-stats, residual covariance contributions and correlations, rolling 63-day split over
     the full price history. Shown in the "Idiosyncratic Risk" tab (`views/idio.py`), whose
     row-click detail panel is wired up in `app.py` (`select_idio_name`).
+- `dashboard/optimizer.py`: maths for the Ratio Testing page. `run()` estimates returns, covariance and
+  betas from `Analysis.history` (full daily return history, holiday rows dropped) over a chosen lookback,
+  then solves six objectives with SciPy SLSQP (max Sharpe, min vol, min idiosyncratic risk, max Sortino,
+  risk parity, max diversification), the efficient frontier and a random-portfolio cloud. Results are
+  cached per settings. Page: `views/ratio_testing.py` at `/ratio-testing`; callbacks in `app.py`.
 - `dashboard/data.py`: reads the portfolio file (flexible column aliases; `CASH` row =
   dollars; negative quantity = short). Prices come from Yahoo's public chart endpoint and
   are cached per ticker as CSV in `data/cache/` for 12 hours.
