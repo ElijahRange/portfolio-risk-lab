@@ -1,4 +1,5 @@
 """Project-wide settings. Change factor proxies, lookbacks and file locations here."""
+import os
 from pathlib import Path
 
 APP_TITLE = "Portfolio Risk Lab"
@@ -65,3 +66,23 @@ MIN_HISTORY_COVERAGE = 0.6  # drop tickers with less than 60% of the lookback wi
 RISK_FREE_RATE = 0.04            # annual; default for Sharpe/Sortino, editable on the page
 OPT_LOOKBACKS = {"1Y": 252, "3Y": 756, "Full": None}  # None = all history in the price file
 FRONTIER_POINTS = 30
+
+# Company Research page: earnings calls from Alpha Vantage, analysed once and stored locally.
+RESEARCH_DB = DATA_DIR / "research" / "research.db"  # git-ignored: licensed transcript text
+ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
+ALPHAVANTAGE_PAUSE = 1.2      # seconds between requests (free plan rate limit)
+RESEARCH_QUARTERS = 4         # latest calls fetched per company
+RESEARCH_KEY_POINTS = 8       # key sentences kept per call
+TONE_GOOD, TONE_BAD = 0.5, 0.2  # Alpha Vantage turn sentiment (0 to 1) thresholds for colours
+
+
+def alphavantage_key() -> str | None:
+    """ALPHAVANTAGE_API_KEY from the environment, or from .env (read live, so no restart is needed)."""
+    if os.environ.get("ALPHAVANTAGE_API_KEY"):
+        return os.environ["ALPHAVANTAGE_API_KEY"].strip()
+    env = ROOT / ".env"
+    if env.exists():
+        for line in env.read_text().splitlines():
+            if line.strip().startswith("ALPHAVANTAGE_API_KEY="):
+                return line.split("=", 1)[1].strip().strip("'\"") or None
+    return None

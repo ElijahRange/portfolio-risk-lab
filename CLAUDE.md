@@ -39,6 +39,12 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   then solves six objectives with SciPy SLSQP (max Sharpe, min vol, min idiosyncratic risk, max Sortino,
   risk parity, max diversification), the efficient frontier and a random-portfolio cloud. Results are
   cached per settings. Page: `views/ratio_testing.py` at `/ratio-testing`; callbacks in `app.py`.
+- `dashboard/transcripts.py`: Company Research data. `ingest(symbol)` pulls Alpha Vantage OVERVIEW, EARNINGS
+  and EARNINGS_CALL_TRANSCRIPT (fiscal quarter labels), stores them in SQLite at `data/research/research.db`
+  (git-ignored, licensed text) and runs a one-off NLP pass per call (sections, tone, key points, guidance,
+  analyst questions, TF-IDF topics). The page (`views/research.py`, `/research`) only reads the DB, so it
+  is instant. Preload with `scripts/research_fetch.py`. Key: `ALPHAVANTAGE_API_KEY` in `.env` (read live).
+  Free plan = 25 requests/day; a new company costs 2 + 4 requests.
 - `dashboard/data.py`: reads the portfolio file (flexible column aliases; `CASH` row =
   dollars; negative quantity = short). Prices come from Yahoo's public chart endpoint and
   are cached per ticker as CSV in `data/cache/` for 12 hours.
@@ -114,11 +120,11 @@ outside the login-protected site. The file has **prices only, no position sizes*
 ## Status (2026-10-17)
 
 - Live: dashboard on the team's data, GitHub repo + auto-sync, team invites sent.
-- **Portfolio:** `data/private/portfolio.csv` on the server (git-ignored). Placeholder
-  sizing: **equal weight** (`weight` = 1 for each of the 9 stocks) with
-  `PORTFOLIO_AUM = 1_000_000`, i.e. about $111,111 per name.
-  - The team will later replace this with real positions and live API prices; don't
-    build that until asked.
+- **Portfolio:** `data/private/portfolio.csv` on the server (git-ignored) holds the team's real position
+  sizes since 2026-10-17: the `weight` column is each position's dollar amount, and they sum to
+  `PORTFOLIO_AUM = 1_000_000`, so sizing is exact. The old equal-weight file is kept as
+  `portfolio_equal_weight_backup.csv.bak`.
+  - The team may later switch to share quantities and live API prices; don't build that until asked.
 - **Prices:**
   - `data.load_bloomberg_prices()` reads Sheet3 `PX_LAST` and is the price source for the
     holdings and the SPX benchmark (`service._prices`).

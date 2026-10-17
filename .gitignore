@@ -3,6 +3,7 @@
 data/private/*
 !data/private/README.md
 data/cache/
+data/research/
 
 .venv/
 __pycache__/

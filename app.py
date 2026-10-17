@@ -6,8 +6,8 @@ import time
 from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
-from dashboard import config, service, theme  # noqa: F401  (theme registers the Plotly template)
-from dashboard.views import factors, idio, notes, overview, ratio_testing, risk
+from dashboard import config, service, theme, transcripts  # noqa: F401  (theme registers the Plotly template)
+from dashboard.views import factors, idio, notes, overview, ratio_testing, research, risk
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
@@ -29,7 +29,8 @@ TABS = {
     "idio": ("Idiosyncratic Risk", idio),
     "risk": ("Risk Analysis", risk),
 }
-PAGES = {"/": "Portfolio", "/ratio-testing": "Ratio Testing", "/notes": "Model notes"}
+PAGES = {"/": "Portfolio", "/ratio-testing": "Ratio Testing", "/research": "Company Research",
+         "/notes": "Model notes"}
 NAV_IDS = {path: f"nav-{label.lower().replace(' ', '-')}" for path, label in PAGES.items()}
 
 
@@ -44,6 +45,8 @@ sidebar = html.Aside([
         html.Div("Workspace", className="nav-group"),
         nav_link("Portfolio", "/"),
         nav_link("Ratio Testing", "/ratio-testing"),
+        html.Div("Research", className="nav-group"),
+        nav_link("Company Research", "/research"),
         html.Div("Reference", className="nav-group"),
         nav_link("Model notes", "/notes"),
     ]),
@@ -80,12 +83,14 @@ app.layout = html.Div([
 
 @app.callback(Output("page", "children"), Output("header-title", "children"),
               *[Output(nav_id, "className") for nav_id in NAV_IDS.values()],
-              Input("url", "pathname"))
-def route(pathname):
+              Input("url", "pathname"), State("url", "search"))
+def route(pathname, search):
     pathname = pathname if pathname in PAGES else "/"
     active = ["nav-link active" if p == pathname else "nav-link" for p in PAGES]
     if pathname == "/notes":
         page = notes.layout()
+    elif pathname == "/research":
+        page = research.layout(search)
     elif pathname == "/ratio-testing":
         try:
             page = ratio_testing.layout(service.current_analysis())
@@ -190,6 +195,63 @@ def reset_custom_weights(_, ids):
         return [no_update] * len(ids)
     w = w / w.sum()
     return [round(float(w.get(i["index"], 0.0)) * 100, 1) for i in ids]
+
+
+# ---------- Company Research page ----------
+
+@app.callback(Output("rs-selected", "data"),
+              Input("rs-open", "n_clicks"), Input("rs-search", "n_submit"),
+              Input({"type": "rs-company", "index": ALL}, "n_clicks"),
+              Input({"type": "rs-call", "index": ALL}, "n_clicks"),
+              Input({"type": "rs-back", "index": ALL}, "n_clicks"),
+              Input("rs-fetched", "data"),
+              State("rs-search", "value"), State("rs-selected", "data"), prevent_initial_call=True)
+def research_select(_open, _submit, _companies, _calls, _back, fetched, text, selected):
+    trig = ctx.triggered_id
+    if not ctx.triggered or not ctx.triggered[0]["value"]:
+        return no_update  # a list re-render, not a click
+    selected = selected or {}
+    if trig in ("rs-open", "rs-search"):
+        symbol = research.resolve(text)
+        return {"symbol": symbol, "quarter": None, "missing": None if symbol else text}
+    if trig == "rs-fetched":
+        return {"symbol": fetched["symbol"], "quarter": None} if fetched.get("ok") else no_update
+    if isinstance(trig, dict) and trig["type"] == "rs-company":
+        return {"symbol": trig["index"], "quarter": None}
+    if isinstance(trig, dict) and trig["type"] == "rs-call":
+        return {"symbol": selected.get("symbol"), "quarter": trig["index"]}
+    if isinstance(trig, dict) and trig["type"] == "rs-back":
+        return {"symbol": None, "quarter": None}
+    return no_update
+
+
+@app.callback(Output("rs-body", "children"), Input("rs-selected", "data"))
+def research_body(selected):
+    try:
+        if selected and selected.get("missing"):
+            return html.Div([ui.alert(f"No company matching '{selected['missing']}' in the library",
+                                      "Use Fetch calls on the right to download it from Alpha Vantage.", "info"),
+                             research.library_view()])
+        return research.body(selected)
+    except Exception as exc:
+        return ui.alert("Could not open the research page", f"{type(exc).__name__}: {exc}", "error")
+
+
+@app.callback(Output("rs-add-status", "children"), Output("rs-fetched", "data"), Output("rs-names", "children"),
+              Input("rs-add-btn", "n_clicks"), Input("rs-add", "n_submit"), State("rs-add", "value"),
+              prevent_initial_call=True)
+def research_fetch(_clicks, _submit, ticker):
+    if not ticker:
+        return ui.alert("Type a ticker first", tone="info"), no_update, no_update
+    try:
+        report = transcripts.ingest(ticker)
+    except transcripts.AlphaVantageError as exc:
+        return ui.alert("Could not fetch from Alpha Vantage", str(exc), "warn"), no_update, no_update
+    except Exception as exc:
+        return ui.alert("Fetch failed", f"{type(exc).__name__}: {exc}", "error"), no_update, no_update
+    stored = transcripts.company(report["symbol"]) is not None
+    names = [html.Option(value=c["symbol"], label=c["name"]) for c in transcripts.library()]
+    return (research.fetch_status(report), {"symbol": report["symbol"], "ok": stored, "t": time.time()}, names)
 
 
 if __name__ == "__main__":
