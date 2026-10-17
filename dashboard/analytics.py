@@ -75,7 +75,8 @@ def _pca(R: pd.DataFrame, weights: pd.Series, factor_raw: pd.DataFrame):
     return points, labels
 
 
-def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: list[str]) -> Analysis:
+def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: list[str],
+          benchmark: str = config.BENCHMARK) -> Analysis:
     warnings = []
     if failed:
         warnings.append(f"No price data for {', '.join(failed)}; excluded.")
@@ -107,7 +108,7 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
     w = h.set_index("ticker")["weight"]
 
     R = rets[w.index].fillna(0.0)
-    bench = rets[config.BENCHMARK].fillna(0.0)
+    bench = rets[benchmark].fillna(0.0)
     port = pd.Series(R.to_numpy() @ w.to_numpy(), index=R.index, name="Portfolio")
 
     # Single-index beta of each name to the benchmark.
@@ -183,7 +184,7 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
         positions=h.sort_values("weight", key=abs, ascending=False).reset_index(drop=True),
         kpis=kpis,
         port_returns=port,
-        bench_returns=bench.rename(config.BENCHMARK),
+        bench_returns=bench.rename(benchmark),
         rolling_beta=rolling_beta,
         factor_table=factor_table,
         risk_split={"factor": factor_var, "idiosyncratic": specific_var},

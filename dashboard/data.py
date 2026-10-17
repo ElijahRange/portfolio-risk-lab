@@ -12,6 +12,7 @@ from . import config
 COLUMN_ALIASES = {
     "ticker": ["ticker", "symbol", "security", "stock"],
     "quantity": ["quantity", "shares", "qty", "position", "units"],
+    "weight": ["weight", "weights", "allocation"],
     "sector": ["sector", "gics sector", "industry"],
 }
 
@@ -28,9 +29,10 @@ def portfolio_path() -> Path:
 
 
 def load_holdings(path: Path | None = None) -> pd.DataFrame:
-    """Return one row per ticker with columns ticker, quantity, sector.
+    """Return one row per ticker with columns ticker, sector and either quantity or weight.
 
-    Negative quantity = short. Cash rows (see config.CASH_TICKERS) keep quantity in dollars.
+    Negative quantity/weight = short. Cash rows (see config.CASH_TICKERS) keep quantity in
+    dollars. Weights are turned into quantities by size_positions() once prices are known.
     """
     path = path or portfolio_path()
     raw = pd.read_excel(path) if path.suffix.lower() in {".xlsx", ".xls"} else pd.read_csv(path)
@@ -41,17 +43,68 @@ def load_holdings(path: Path | None = None) -> pd.DataFrame:
         match = next((a for a in aliases if a in raw.columns), None)
         if match:
             picked[field] = raw[match]
-        elif field != "sector":
-            raise ValueError(f"{path.name}: no '{field}' column (looked for {', '.join(aliases)})")
+    if "ticker" not in picked or not {"quantity", "weight"} & picked.keys():
+        raise ValueError(f"{path.name}: needs a ticker column and a quantity or weight column")
 
     df = pd.DataFrame(picked)
+    size = "quantity" if "quantity" in df else "weight"
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
-    df = df[df["ticker"].ne("") & df["quantity"].notna() & df["quantity"].ne(0)]
+    df[size] = pd.to_numeric(df[size], errors="coerce")
+    df = df[df["ticker"].ne("") & df[size].notna() & df[size].ne(0)]
     if "sector" not in df:
         df["sector"] = "Unclassified"
     df["sector"] = df["sector"].fillna("Unclassified").astype(str)
-    return df.groupby("ticker", as_index=False).agg(quantity=("quantity", "sum"), sector=("sector", "first"))
+    return df.groupby("ticker", as_index=False).agg(**{size: (size, "sum"), "sector": ("sector", "first")})
+
+
+def size_positions(holdings: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
+    """Convert relative weights to quantities so gross exposure = config.PORTFOLIO_AUM."""
+    if "quantity" in holdings:
+        return holdings
+    h = holdings.copy()
+    dollars = h["weight"] / h["weight"].abs().sum() * config.PORTFOLIO_AUM
+    last = prices.ffill().iloc[-1]
+    is_cash = h["ticker"].isin(config.CASH_TICKERS)
+    h["quantity"] = dollars.where(is_cash, dollars / h["ticker"].map(last))
+    return h.drop(columns="weight")
+
+
+def load_bloomberg_prices(path: Path | None = None, sheet: str | None = None) -> pd.DataFrame:
+    """Daily PX_LAST per security from a Bloomberg Excel export, one column per ticker.
+
+    Layout: a security-name row, a long-name row, then a field-code row starting with
+    "Dates"; each security spans several columns and is named only in its first one.
+    """
+    path = path or config.BLOOMBERG_FILE
+    raw = pd.read_excel(path, sheet_name=sheet or config.BLOOMBERG_PRICE_SHEET, header=None)
+    header = raw.index[raw.iloc[:, 0].astype(str).eq("Dates")][0]
+    securities, fields = raw.iloc[header - 2].ffill(), raw.iloc[header]
+    body = raw.iloc[header + 1:]
+
+    columns = {}
+    for j in range(1, raw.shape[1]):
+        if fields.iloc[j] == "PX_LAST":
+            name = str(securities.iloc[j]).strip()
+            ticker = config.BLOOMBERG_TICKER_MAP.get(name, name.removesuffix(" US Equity"))
+            columns[ticker] = pd.to_numeric(body.iloc[:, j], errors="coerce").to_numpy()
+    prices = pd.DataFrame(columns, index=pd.to_datetime(body.iloc[:, 0], errors="coerce").to_numpy())
+    prices = prices[prices.index.notna()].sort_index()
+    # Bloomberg repeats the previous row on days when every market was closed.
+    return prices[~prices.eq(prices.shift()).all(axis=1)]
+
+
+def to_usd(local: pd.DataFrame, fx: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Divide non-USD prices by their FX rate (local currency per USD). Returns (prices, warnings)."""
+    out, warnings = local.copy(), []
+    for ticker, fx_symbol in config.LOCAL_CURRENCY_FX.items():
+        if ticker not in out:
+            continue
+        if fx_symbol not in fx:
+            warnings.append(f"No {fx_symbol} rate; {ticker} is shown in its local currency.")
+            continue
+        rate = fx[fx_symbol].reindex(out.index.union(fx.index)).ffill().reindex(out.index)
+        out[ticker] = out[ticker] / rate
+    return out, warnings
 
 
 def _cache_file(ticker: str) -> Path:

@@ -103,15 +103,22 @@ outside the login-protected site. The file has **prices only, no position sizes*
 
 ## Status (2026-10-17)
 
-- Live: dashboard (sample portfolio), GitHub repo + auto-sync, team invites sent.
-- **Next task:** make this Bloomberg file the price source and run the dashboard on the
-  team's nine stocks.
-  - Ask Elijah for **position sizes** (shares or $ / % weights, and whether any are short)
-    before building.
-  - Then add a loader for the Bloomberg layout in `dashboard/data.py`, used instead of the
-    Yahoo download. Keep Yahoo only for the factor ETFs, which aren't in the file.
-  - SPX from the file can be the benchmark. The options and 200-day MA fields are a
-    natural input for an ML signal/forecast feature.
+- Live: dashboard on the team's data, GitHub repo + auto-sync, team invites sent.
+- **Portfolio:** `data/private/portfolio.csv` on the server (git-ignored). Placeholder
+  sizing: **equal weight** (`weight` = 1 for each of the 9 stocks) with
+  `PORTFOLIO_AUM = 1_000_000`, i.e. about $111,111 per name.
+  - The team will later replace this with real positions and live API prices; don't
+    build that until asked.
+- **Prices:**
+  - `data.load_bloomberg_prices()` reads Sheet3 `PX_LAST` and is the price source for the
+    holdings and the SPX benchmark (`service._prices`).
+  - Yahoo is still used for the factor ETFs, for `INR=X` (RELIANCE.NS is converted to
+    USD) and for any holding missing from the file.
+- **Verified:**
+  - The file's prices match Yahoo to the cent.
+  - Negative 1-year betas for VZ, CB and PM are real; Yahoo gives the same.
+- Options and 200-day MA fields (Sheet1) are unused so far. They're a natural input for
+  the ML feature.
 
 ## Ideas not built yet
 

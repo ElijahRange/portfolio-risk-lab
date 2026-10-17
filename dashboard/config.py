@@ -18,7 +18,21 @@ PORTFOLIO_FILES = [
 # Rows with these tickers are treated as cash (quantity = dollars).
 CASH_TICKERS = {"CASH", "$CASH", "USD"}
 
-BENCHMARK = "SPY"
+# When the portfolio file gives a `weight` column instead of `quantity`, weights are
+# relative (any scale) and positions are sized so gross exposure equals this amount.
+PORTFOLIO_AUM = 1_000_000
+
+BENCHMARK = "SPY"  # used when there is no Bloomberg file
+
+# The team's Bloomberg export (git-ignored). When present it is the price source for the
+# holdings and the benchmark; Yahoo is still used for factor ETFs and FX rates.
+BLOOMBERG_FILE = PRIVATE_DIR / "IMBZportfolio_hist_data.xlsx"
+BLOOMBERG_PRICE_SHEET = "Sheet3"
+BLOOMBERG_BENCHMARK = "SPX"
+# Bloomberg security -> ticker used in the app. Anything else just drops " US Equity".
+BLOOMBERG_TICKER_MAP = {"SPX Index": "SPX", "RELIANCE IN Equity": "RELIANCE.NS"}
+# Non-USD tickers -> Yahoo FX symbol quoting local currency per 1 USD.
+LOCAL_CURRENCY_FX = {"RELIANCE.NS": "INR=X"}
 
 # Factor name -> ETF proxy. Every factor except the market is orthogonalised to the
 # market before the regression, so its beta reads as exposure *beyond* market beta.
