@@ -1,0 +1,11 @@
+# Secrets and private data never go to GitHub
+.env
+data/private/*
+!data/private/README.md
+data/cache/
+
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/

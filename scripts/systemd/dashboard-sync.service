@@ -1,0 +1,6 @@
+[Unit]
+Description=Pull Portfolio Risk Lab from GitHub
+
+[Service]
+Type=oneshot
+ExecStart=%h/portfolio-risk-lab/scripts/sync.sh

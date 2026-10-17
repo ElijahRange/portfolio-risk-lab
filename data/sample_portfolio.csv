@@ -1,0 +1,20 @@
+ticker,quantity,sector
+AAPL,1200,Information Technology
+MSFT,700,Information Technology
+NVDA,1500,Information Technology
+AMZN,900,Consumer Discretionary
+GOOGL,1000,Communication Services
+JPM,800,Financials
+V,500,Financials
+UNH,300,Health Care
+LLY,180,Health Care
+XOM,1100,Energy
+CAT,350,Industrials
+COST,150,Consumer Staples
+HD,300,Consumer Discretionary
+KO,1500,Consumer Staples
+NEE,1000,Utilities
+TSLA,-300,Consumer Discretionary
+INTC,-2500,Information Technology
+F,-5000,Consumer Discretionary
+CASH,150000,Cash
