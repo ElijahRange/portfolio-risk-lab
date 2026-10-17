@@ -76,6 +76,43 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
 - Commit small, descriptive changes to `main`. Teammates push from laptops; the server
   pulls.
 
+## Team data file: `data/private/IMBZportfolio_hist_data.xlsx`
+
+This is Bloomberg Terminal export data. It is git-ignored; never commit it or expose it
+outside the login-protected site. The file has **prices only, no position sizes**.
+
+- **Sheet3** (main price sheet):
+  - Daily `PX_LAST`, `PX_OPEN`, `PX_VOLUME`, `BETA_RAW_OVERRIDABLE` for VZ, MMM, SPX Index,
+    RELIANCE IN, WMT, TPB, TGT, CB, BA and PM.
+  - 1,448 rows from 2021-03-31 to 2026-10-16.
+- **Sheet1**: the same names, with `VOLUME_TOTAL_CALL`, `VOLUME_TOTAL_PUT`,
+  `PUT_CALL_OPEN_INTEREST_TOTAL`, `PUT_CALL_VOLUME_RATIO_CUR_DAY` and `MOV_AVG_200D`.
+- **Sheet2**: `SPXL1 Index`, with price, volume, beta and put/call fields. It has 1,394 rows
+  and no holiday rows. Its prices match SPX.
+- **Layout:** each sheet has a 2-row preamble (`Start Date`/`End Date`). Then comes a
+  security-name row, a long-name row, and a field-code row whose first cell is `Dates`.
+  Each security spans N columns; the name appears only in its first column.
+- **Quirks:**
+  - US/India market holidays are forward-filled (e.g. 2021-04-02 repeats 2021-04-01), so
+    drop repeated rows before computing returns.
+  - Sheet1 `PUT_CALL_OPEN_INTEREST_TOTAL` is all `#N/A N/A` for SPX and RELIANCE IN.
+  - Sheet2 lists `VOLUME_TOTAL_PUT` twice.
+  - RELIANCE IN is priced in **INR** on India's NSE (Yahoo: `RELIANCE.NS`). Convert it to
+    USD (e.g. USDINR) before mixing it with USD names.
+  - Bloomberg tickers map to Yahoo tickers by dropping " US Equity". SPX Index = `^GSPC`.
+
+## Status (2026-10-17)
+
+- Live: dashboard (sample portfolio), GitHub repo + auto-sync, team invites sent.
+- **Next task:** make this Bloomberg file the price source and run the dashboard on the
+  team's nine stocks.
+  - Ask Elijah for **position sizes** (shares or $ / % weights, and whether any are short)
+    before building.
+  - Then add a loader for the Bloomberg layout in `dashboard/data.py`, used instead of the
+    Yahoo download. Keep Yahoo only for the factor ETFs, which aren't in the file.
+  - SPX from the file can be the benchmark. The options and 200-day MA fields are a
+    natural input for an ML signal/forecast feature.
+
 ## Ideas not built yet
 
 - Upload a new portfolio snapshot from the UI (`dcc.Upload`) instead of `scp`.
