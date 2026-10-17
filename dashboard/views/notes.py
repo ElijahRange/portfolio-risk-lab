@@ -17,6 +17,10 @@ def layout():
             html.Li("Beta: how much a stock moved per 1% move in the S&P 500 (SPY)."),
             html.Li(f"Factor model: each stock's returns are regressed on ETF proxies — {factors}. "
                     "Non-market factors are measured beyond the market."),
+            html.Li("Idiosyncratic risk: each stock and the whole book are regressed on the S&P 500 (single-index "
+                    "market model). Beta × index is the systematic part; alpha + the leftover residual is the "
+                    "stock-specific (idiosyncratic) part. R² is the share of variance the index explains. "
+                    "t-stats use Newey–West standard errors."),
             html.Li("VaR (95%): the 1-day loss exceeded on only 5% of days in the window. "
                     "CVaR is the average loss on those worst days."),
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "

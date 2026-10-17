@@ -122,11 +122,31 @@ a { color: inherit; text-decoration: none; }
 .segmented input { display: none; }
 .segmented label:has(input:checked) { background: var(--surface-2); color: var(--text-strong); }
 
+/* ---------- section heading + master/detail (Idiosyncratic Risk tab) ---------- */
+.section-head { margin: 4px 0 14px; }
+.section-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-strong); }
+.split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.split-right { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.split .data-table th, .split .data-table td { padding: 8px 8px; }
+.split .minibar { width: 56px; }
+.row-click { cursor: pointer; }
+.data-table tbody tr.selected { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--primary); }
+.detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.detail-ticker { font-size: 15px; }
+.detail-sub { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin: 14px 0 4px; }
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.tile-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.tile-value { font-family: var(--mono); font-size: 17px; font-weight: 500; color: var(--text-strong); }
+.tile-value.pos { color: var(--pos); }
+.tile-value.neg { color: var(--neg); }
+.tile-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 3px; }
+
 .notes { margin: 0; padding-left: 18px; line-height: 1.8; }
 
 /* ---------- small screens ---------- */
 @media (max-width: 1000px) {
-  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .grid-2, .split { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); }

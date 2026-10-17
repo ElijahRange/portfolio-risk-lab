@@ -26,7 +26,19 @@ class Analysis:
     pca_points: pd.DataFrame         # ticker, side, weight, pc1..pc3
     pca_labels: list[str]
     corr: pd.DataFrame
+    idio: "IdioRisk"
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class IdioRisk:
+    """Single-index (market model) split of risk against the benchmark: r = alpha + beta * r_m + e."""
+    names: pd.DataFrame              # per ticker: weight, beta/alpha (+ t-stats), r2, vols, returns, idio_contrib
+    kpis: dict
+    returns: pd.DataFrame            # daily returns of the names and the benchmark over the window
+    resid_corr: pd.DataFrame         # correlation of the residuals e (what the market doesn't explain)
+    cum_split: pd.DataFrame          # summed daily return: market part, idiosyncratic part, total
+    rolling: pd.DataFrame            # rolling idiosyncratic share of variance, idiosyncratic vol, beta
 
 
 def _ols(y: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -73,6 +85,108 @@ def _pca(R: pd.DataFrame, weights: pd.Series, factor_raw: pd.DataFrame):
         top = corr.abs().sort_values(ascending=False).index[:2]
         labels.append(f"PC{k + 1} · {' / '.join(top)}")
     return points, labels
+
+
+def _newey_west_se(X: np.ndarray, e: np.ndarray) -> np.ndarray:
+    """OLS standard errors that allow for autocorrelation and uneven variance (Newey-West HAC)."""
+    n = len(e)
+    lags = int(4 * (n / 100) ** (2 / 9))
+    xe = X * e[:, None]
+    S = xe.T @ xe
+    for lag in range(1, lags + 1):
+        G = xe[lag:].T @ xe[:-lag]
+        S += (1 - lag / (lags + 1)) * (G + G.T)
+    XtX_inv = np.linalg.inv(X.T @ X)
+    cov = XtX_inv @ S @ XtX_inv * n / (n - X.shape[1])
+    return np.sqrt(np.diag(cov))
+
+
+def _idiosyncratic(R: pd.DataFrame, bench: pd.Series, w: pd.Series, full: pd.DataFrame, nav: float) -> IdioRisk:
+    """Regress every name and the portfolio on the benchmark and split variance into market vs residual.
+
+    The portfolio's residual is the weighted sum of the names' residuals (OLS is linear), so
+    w' S_e w is exactly its realised residual variance. Comparing that with the diagonal
+    sum(w^2 s_e^2) shows how much the residuals move together, i.e. common risk beyond the market.
+    """
+    n, T = len(R), config.TRADING_DAYS
+    m = bench.to_numpy()
+    wv = w.to_numpy()
+    Y = np.column_stack([R.to_numpy(), R.to_numpy() @ wv])  # last column = portfolio
+    X = np.column_stack([np.ones(n), m])
+    coef, *_ = np.linalg.lstsq(X, Y, rcond=None)
+    E = Y - X @ coef
+    se = np.array([_newey_west_se(X, E[:, j]) for j in range(Y.shape[1])])  # (names + 1, 2)
+    alpha_d, beta = coef
+    alpha_t, beta_t = alpha_d / se[:, 0], beta / se[:, 1]
+
+    var_m = m.var(ddof=1) * T
+    tot_var = Y.var(axis=0, ddof=1) * T
+    idio_var = E.var(axis=0, ddof=1) * T
+    sys_ret = beta * m.sum()
+    idio_ret = Y.sum(axis=0) - sys_ret
+
+    S_e = np.cov(E[:, :-1], rowvar=False) * T
+    port_idio_var = idio_var[-1]
+    diag_idio_var = float((wv ** 2 * idio_var[:-1]).sum())
+    contrib = wv * (S_e @ wv) / port_idio_var if port_idio_var > 0 else wv * 0
+
+    k = slice(None, -1)
+    names = pd.DataFrame({
+        "weight": wv,
+        "beta": beta[k], "beta_t": beta_t[k],
+        "alpha": alpha_d[k] * T, "alpha_t": alpha_t[k],
+        "r2": 1 - idio_var[k] / tot_var[k],
+        "total_vol": np.sqrt(tot_var[k]),
+        "sys_vol": np.abs(beta[k]) * np.sqrt(var_m),
+        "idio_vol": np.sqrt(idio_var[k]),
+        "sys_ret": sys_ret[k],
+        "idio_ret": idio_ret[k],
+        "idio_contrib": contrib,
+    }, index=R.columns)
+
+    pb, sys_var = beta[-1], beta[-1] ** 2 * var_m
+    total_var = sys_var + port_idio_var
+    kpis = {
+        "beta": float(pb),
+        "beta_t": float(beta_t[-1]),
+        "alpha": float(alpha_d[-1] * T),
+        "alpha_t": float(alpha_t[-1]),
+        "r2": float(1 - port_idio_var / tot_var[-1]),
+        "sys_ret": float(sys_ret[-1]),
+        "idio_ret": float(idio_ret[-1]),
+        "sys_vol": float(np.sqrt(sys_var)),
+        "idio_vol": float(np.sqrt(port_idio_var)),
+        "idio_share": float(port_idio_var / total_var) if total_var > 0 else 0.0,
+        "diag_idio_vol": float(np.sqrt(diag_idio_var)),
+        "info_ratio": float(alpha_d[-1] * T / np.sqrt(port_idio_var)) if port_idio_var > 0 else 0.0,
+        "hedge_usd": float(-pb * nav),  # benchmark notional that makes the book beta-neutral
+        "start": R.index[0],
+        "end": R.index[-1],
+        "days": n,
+    }
+
+    cum_split = pd.DataFrame({
+        "Market (β × index)": np.cumsum(pb * m),
+        "Idiosyncratic (α + ε)": np.cumsum(Y[:, -1] - pb * m),
+        "Total": np.cumsum(Y[:, -1]),
+    }, index=R.index)
+
+    # Rolling split over the full price history, same constant-weight holdings.
+    win = config.ROLLING_BETA_DAYS
+    fp = full[w.index].fillna(0.0) @ wv
+    fb = full[bench.name].fillna(0.0)
+    p_var, b_var = fp.rolling(win).var(), fb.rolling(win).var()
+    r_beta = fp.rolling(win).cov(fb) / b_var
+    r_resid_var = (p_var - r_beta ** 2 * b_var).clip(lower=0)
+    rolling = pd.DataFrame({
+        "idio_share": r_resid_var / p_var,
+        "idio_vol": np.sqrt(r_resid_var * T),
+        "beta": r_beta,
+    }).dropna()
+
+    resid_corr = pd.DataFrame(np.corrcoef(E[:, :-1], rowvar=False), index=R.columns, columns=R.columns)
+    return IdioRisk(names=names, kpis=kpis, returns=R.assign(**{bench.name: m}), resid_corr=resid_corr,
+                    cum_split=cum_split, rolling=rolling)
 
 
 def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: list[str],
@@ -191,5 +305,6 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
         pca_points=pca_points,
         pca_labels=pca_labels,
         corr=R[top].corr(),
+        idio=_idiosyncratic(R, bench.rename(benchmark), w, prices.pct_change(fill_method=None).iloc[1:], nav),
         warnings=warnings,
     )

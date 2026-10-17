@@ -3,11 +3,11 @@ import os
 import platform
 import time
 
-from dash import Dash, Input, Output, State, dcc, html, no_update
+from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
 from dashboard import config, service, theme  # noqa: F401  (theme registers the Plotly template)
-from dashboard.views import factors, notes, overview, risk
+from dashboard.views import factors, idio, notes, overview, risk
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
@@ -23,7 +23,12 @@ elif os.environ.get("DASH_USERS"):
 else:
     raise RuntimeError("Set DASH_USERS=user:password[,user2:password2] or DASH_AUTH_DISABLED=1 (local only).")
 
-TABS = {"overview": ("Portfolio View", overview), "factors": ("Factor Model", factors), "risk": ("Risk Analysis", risk)}
+TABS = {
+    "overview": ("Portfolio View", overview),
+    "factors": ("Factor Model", factors),
+    "idio": ("Idiosyncratic Risk", idio),
+    "risk": ("Risk Analysis", risk),
+}
 PAGES = {"/": "Portfolio", "/notes": "Model notes"}
 
 
@@ -112,6 +117,20 @@ def filter_positions(side):
         return overview.positions_table(service.current_analysis(), side)
     except Exception:
         return no_update
+
+
+@app.callback(Output("idio-detail", "children"), Output({"type": "idio-row", "index": ALL}, "className"),
+              Input({"type": "idio-row", "index": ALL}, "n_clicks"), State({"type": "idio-row", "index": ALL}, "id"),
+              prevent_initial_call=True)
+def select_idio_name(clicks, ids):
+    if not ctx.triggered_id or not any(clicks):
+        return no_update, no_update
+    ticker = ctx.triggered_id["index"]
+    try:
+        detail = idio.detail(service.current_analysis(), ticker)
+    except Exception:
+        return no_update, no_update
+    return detail, [idio._row_class(i["index"], ticker) for i in ids]
 
 
 if __name__ == "__main__":
