@@ -85,6 +85,17 @@ ASSISTANT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"   # ~90 MB, ~10 ms pe
 ASSISTANT_THRESHOLD = 0.5     # below this similarity the assistant lists what it can answer instead of guessing
 ASSISTANT_HISTORY = 40        # chat messages kept in the browser session
 
+# Chat replies written by Claude (Anthropic API) from a snapshot of the dashboard's numbers. Needs ANTHROPIC_API_KEY in
+# .env (read live, no restart). Without it, or if the API fails, the assistant uses its built-in template answers.
+AI_MODEL = "claude-haiku-5-5"
+AI_MODEL_LABEL = "Claude Haiku 5.5"
+AI_EFFORT = "low"             # fast, cheap replies; questions are short and the data is precomputed
+AI_MAX_TOKENS = 2000
+AI_TIMEOUT = 25               # seconds before falling back to the built-in answer
+AI_HISTORY_TURNS = 3          # earlier question/answer pairs sent along, for follow-ups like "what about 99%?"
+AI_LIMIT_PER_VISITOR = (6, 60)  # Claude questions per minute / per hour from one IP address (the site is public)
+AI_LIMIT_PER_DAY = 1500       # for the whole site; after that, built-in answers until midnight (server time)
+
 HF_MODELS = (FINBERT_MODEL, ASSISTANT_MODEL)
 
 
@@ -105,6 +116,11 @@ def _env_file_value(name: str) -> str | None:
             if line.strip().startswith(f"{name}="):
                 return line.split("=", 1)[1].strip().strip("'\"") or None
     return None
+
+
+def anthropic_api_key() -> str | None:
+    """Key for Claude chat replies (ANTHROPIC_API_KEY in .env). Never log or display it."""
+    return _env_file_value("ANTHROPIC_API_KEY")
 
 
 def sec_user_agent() -> str | None:

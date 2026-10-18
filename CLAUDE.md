@@ -52,10 +52,25 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   - Preload demo companies: `podman exec dashboard .venv/bin/python scripts/research_preload.py [TICKERS]`.
   - Limits: press releases, not call transcripts (no analyst Q&A); foreign filers on Form 6-K
     (e.g. RELIANCE) aren't covered.
-- Portfolio assistant: a chat bubble fixed bottom-right on **every page** (`views/chat.py`, mounted in
-  `app.layout` outside `html.Main(id="page")`, so it survives navigation). Callbacks are in `app.py`
-  (`chat_ask`, `chat_render`, plus clientside open/close and scroll); `assets/chat.js` adds Escape-to-close
-  and tab switching for its links.
+- Portfolio assistant: a chat bubble fixed bottom-right on **every page**. **Claude writes the replies**
+  (`dashboard/ai_chat.py`); the on-device MiniLM router below picks the related chart link and follow-up chips and is
+  the fallback.
+  - `ai_chat.reply(question, log)`: runs `assistant.answer()` first (route + fallback), then calls the Anthropic API
+    (`config.AI_MODEL` = `claude-haiku-5-5`, effort `low`, ~1–3 s) with a system prompt plus `snapshot(d)`, a ~2.5K-token
+    text dump of every number the dashboard shows (positions, sector aggregates, KPIs, VaR, stress, factors,
+    correlations, optimizer table, FinBERT tones, where each chart lives). The snapshot is deterministic so prompt
+    caching hits (~4.9K cached tokens per question). The last 3 Q&A pairs go along for follow-ups.
+  - Key: `ANTHROPIC_API_KEY` in `.env` (read live via `config.anthropic_api_key()`; never print it). No key, API error,
+    refusal or rate limit → the built-in template answer with a short note. Limits (public site): 6/min and 60/hour
+    per IP, 1,500/day site-wide (`config.AI_LIMIT_*`, in-memory per worker).
+  - The `anthropic` SDK is in `requirements.txt` (pure Python; httpx2/jiter have s390x wheels).
+  - Replies are markdown (`dcc.Markdown`, no raw HTML). A clientside callback shows the question + typing dots
+    while the server works; it must not also listen to `chat-log` (Dash defers callbacks whose inputs a running callback
+    will change), so a second callback hides it.
+  - Widget: `views/chat.py`, mounted in `app.layout` outside `html.Main(id="page")`, so it survives
+    navigation. Callbacks are in `app.py` (`chat_ask`, `chat_render`, plus clientside open/close, typing and
+    scroll); `assets/chat.js` adds Escape-to-close and tab switching for its links.
+- The built-in assistant (router for the reply's chart link and chips, and the fallback answer):
   - `dashboard/assistant.py`: deterministic on purpose. Hugging Face `sentence-transformers/all-MiniLM-L6-v2`
     (`config.ASSISTANT_MODEL`, loaded with `transformers` `AutoModel` + mean pooling, cached in `data/models`)
     embeds the question; the closest example phrasing (cosine) picks one of ~30 intents in `INTENTS`, plus a
@@ -163,6 +178,8 @@ the raw file. The file has **prices only, no position sizes**.
   - Negative 1-year betas for VZ, CB and PM are real; Yahoo gives the same.
 - **Portfolio assistant** (chat bubble, every page) added 2026-10-17: 97% intent accuracy on the check script's
   145 unseen paraphrases, all headline numbers equal to the dashboard's, ~12 ms median answer.
+- 2026-10-18: chat replies now written by Claude Haiku 5.5 (Elijah's choice: real AI answers to free-form
+  questions); the MiniLM assistant stays as router + fallback. Key in the server `.env`.
 - Options and 200-day MA fields (Sheet1) are unused so far. They're a natural input for
   the ML feature.
 

@@ -1,7 +1,8 @@
 """Portfolio assistant chat bubble: fixed bottom-right on every page (mounted outside the routed page).
 
-The conversation lives in the browser session (dcc.Store). Open/close and auto-scroll run in the browser
-(clientside callbacks in app.py); one server callback turns a question into an answer (dashboard/assistant.py).
+The conversation lives in the browser session (dcc.Store). Open/close, the typing indicator and auto-scroll run in
+the browser (clientside callbacks in app.py); one server callback turns a question into an answer: Claude's reply
+(dashboard/ai_chat.py) or, without an API key or when the API fails, the built-in one (dashboard/assistant.py).
 """
 from dash import dcc, html
 
@@ -23,7 +24,7 @@ def layout():
             html.Div([
                 html.Div([
                     html.Div("Portfolio assistant", className="chat-title"),
-                    html.Div([html.Span(className="dot"), "MiniLM on LinuxONE · answers from live dashboard data"],
+                    html.Div([html.Span(className="dot"), "Claude + MiniLM on LinuxONE · live dashboard data"],
                              className="chat-sub"),
                 ]),
                 html.Div([
@@ -32,7 +33,12 @@ def layout():
                                 **{"aria-label": "Close the assistant"}),
                 ], className="chat-head-actions"),
             ], className="chat-head"),
-            html.Div(id="chat-messages", className="chat-messages", role="log", **{"aria-live": "polite"}),
+            html.Div([
+                html.Div(id="chat-messages", className="chat-list", role="log", **{"aria-live": "polite"}),
+                html.Div([html.Div(id="chat-typing-q", className="chat-msg user"),
+                          html.Div([html.Span(), html.Span(), html.Span()], className="chat-msg bot chat-dots",
+                                   title="Thinking…")], id="chat-typing", className="chat-typing"),
+            ], id="chat-scrollbox", className="chat-messages"),
             html.Div(id="chat-chips", className="chat-chips"),
             html.Div([
                 dcc.Input(id="chat-input", type="text", placeholder="Ask about risk, returns or a stock…",
@@ -55,12 +61,17 @@ def _bot(m: dict):
                     className="chat-rows") if m.get("rows") else None
     link = m.get("link")
     meta = None
-    if m.get("title"):
+    if m.get("model"):
+        route = f" · chart picked by MiniLM: {m['title']}" if link and m.get("title") else ""
+        meta = html.Div(f"{m['model']} · {m.get('ms', 0) / 1000:.1f} s{route}", className="chat-meta",
+                        title="Written by Claude from the dashboard's numbers; the related chart was picked on LinuxONE "
+                              "by the sentence-embedding model")
+    elif m.get("title"):
         meta = html.Div(f"{m['title']} · match {m['score']:.2f} · {m.get('ms', 0)} ms", className="chat-meta",
                         title="Intent picked by the sentence-embedding model, its cosine similarity, and the time taken")
     return html.Div(ui._keep(
         head,
-        html.P(m["text"], className="chat-text"),
+        dcc.Markdown(m["md"], className="chat-text chat-md") if m.get("md") else html.P(m["text"], className="chat-text"),
         rows,
         html.P(m["note"], className="chat-note") if m.get("note") else None,
         html.Div(dcc.Link(f"{link['label']} →", href=link["href"], className="chat-link"),

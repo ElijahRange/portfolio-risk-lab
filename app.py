@@ -8,7 +8,7 @@ from urllib.parse import parse_qs
 from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
-from dashboard import assistant, config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
+from dashboard import ai_chat, assistant, config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
 from dashboard.views import chat, factors, idio, notes, overview, ratio_testing, research, risk
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
@@ -291,7 +291,7 @@ def chat_ask(_send, _submit, _chips, _clear, chip_texts, text, log):
         new_input = ""
     else:
         return no_update, no_update
-    reply = assistant.answer(text)  # never raises: errors come back as a polite answer
+    reply = ai_chat.reply(text, log)  # never raises: falls back to the built-in answer
     log = (log or []) + [{"role": "user", "text": text.strip()[:300]}, {"role": "bot", **reply}]
     return log[-config.ASSISTANT_HISTORY:], new_input
 
@@ -316,19 +316,44 @@ app.clientside_callback(
     }""",
     Output("chat-panel", "className"), Output("chat-launcher", "className"), Input("chat-open", "data"))
 
-# Scroll so the newest question sits at the top of the list, with its answer right below it.
+# Show the question and a typing indicator at once while the server (and Claude) works, and hide it when the answer
+# lands. Two callbacks on purpose: Dash holds back any callback whose inputs a running callback will change, so one
+# callback listening to chat-log as well would only fire after the answer arrived.
+app.clientside_callback(
+    """function(_send, _submit, _chips, text, chipTexts) {
+        var skip = [dash_clientside.no_update, dash_clientside.no_update];
+        var trig = (dash_clientside.callback_context.triggered || [])[0];
+        if (!trig) { return skip; }
+        var question = (text || '').trim();
+        if (trig.prop_id.charAt(0) === '{') {  // a suggestion chip
+            if (!trig.value) { return skip; }  // chips were re-rendered, not clicked
+            question = chipTexts[JSON.parse(trig.prop_id.slice(0, trig.prop_id.lastIndexOf('.'))).index];
+        }
+        return question ? [question, 'chat-typing on'] : skip;
+    }""",
+    Output("chat-typing-q", "children"), Output("chat-typing", "className"),
+    Input("chat-send", "n_clicks"), Input("chat-input", "n_submit"), Input({"type": "chat-chip", "index": ALL}, "n_clicks"),
+    State("chat-input", "value"), State({"type": "chat-chip", "index": ALL}, "children"), prevent_initial_call=True)
+
+app.clientside_callback(
+    "function() { return 'chat-typing'; }",
+    Output("chat-typing", "className", allow_duplicate=True), Input("chat-log", "data"), prevent_initial_call=True)
+
+# Scroll so the newest question sits at the top of the list, with its answer right below it (or to the typing dots).
 app.clientside_callback(
     """function() {
         setTimeout(function () {
-            var box = document.getElementById('chat-messages');
+            var box = document.getElementById('chat-scrollbox');
             if (!box) { return; }
-            var asked = box.querySelectorAll('.chat-msg.user');
+            var typing = document.querySelector('.chat-typing.on');
+            var asked = box.querySelectorAll('.chat-list .chat-msg.user');
             var last = asked[asked.length - 1];
-            box.scrollTop = last ? last.offsetTop - 8 : 0;
+            box.scrollTop = typing ? box.scrollHeight : (last ? last.offsetTop - 8 : 0);
         }, 30);
         return Date.now();
     }""",
-    Output("chat-scroll", "data"), Input("chat-messages", "children"), Input("chat-open", "data"))
+    Output("chat-scroll", "data"), Input("chat-messages", "children"), Input("chat-open", "data"),
+    Input("chat-typing", "className"))
 
 
 if __name__ == "__main__":

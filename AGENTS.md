@@ -29,7 +29,7 @@ notes in more detail; keep both in sync when you change something important.
 | Ratio Testing | `/ratio-testing` | Optimizer (max Sharpe, min vol, min idio risk, max Sortino, risk parity, max diversification) + efficient frontier with custom weights | `optimizer.py`, `views/ratio_testing.py` |
 | Company Research | `/research` | Any US stock: earnings press releases from SEC EDGAR, scored by **Hugging Face FinBERT running on LinuxONE**; key points, guidance, tone trend, revenue/EPS, quotes, topics | `edgar.py`, `finbert.py`, `research_store.py`, `views/research.py` |
 | Model notes | `/notes` | Plain-English methodology for judges | `views/notes.py` |
-| Portfolio assistant | every page (bottom-right bubble) | Answers simple questions about the portfolio (VaR, beta, weights, stress tests, optimizer, earnings tone…) with the dashboard's own numbers. **Hugging Face MiniLM embeddings on LinuxONE** route the question to an answer template | `assistant.py`, `views/chat.py`, `assets/chat.js` |
+| Portfolio assistant | every page (bottom-right bubble) | Answers free-form questions about the portfolio. **Claude (Anthropic API)** writes the reply from a snapshot of the dashboard's numbers; **Hugging Face MiniLM on LinuxONE** picks the related chart and is the offline fallback (template answers) | `ai_chat.py`, `assistant.py`, `views/chat.py`, `assets/chat.js` |
 
 **Data:**
 - Prices come from the team's Bloomberg export (VZ, MMM, RELIANCE (converted INR→USD), WMT, TPB,
@@ -86,7 +86,12 @@ commands (logs, restarts, preloading research companies). You don't need SSH for
   - `research_store.ensure(query)` analyses the newest release at once (~8 s for a new company) and
     older ones in a background thread. Results go to SQLite `data/research/edgar.db`, so companies
     already looked up open in under a second.
-- `dashboard/assistant.py` + `views/chat.py`: the portfolio assistant.
+- `dashboard/ai_chat.py`: Claude writes the assistant's replies. `snapshot()` turns every dashboard number into text
+  for the prompt; add new figures there when you add a chart, so the chat can talk about them. Needs
+  `ANTHROPIC_API_KEY` in `.env` (see `.env.example`); without it you get the built-in answers below. Model and rate
+  limits are in `config.py` (`AI_*`). Don't send raw Bloomberg price history to the API, only the derived numbers the
+  site already shows.
+- `dashboard/assistant.py` + `views/chat.py`: the built-in assistant (router + fallback).
   - It is **deterministic on purpose**: a small Hugging Face embedding model (`all-MiniLM-L6-v2`, ~90 MB, cached
     in `data/models/`) picks the closest of ~30 intents by cosine similarity; regex code finds tickers, VaR
     level, scenario and optimizer goal; a template fills in numbers from `service` / `risk_metrics` /
@@ -110,7 +115,8 @@ commands (logs, restarts, preloading research companies). You don't need SSH for
 - **The site is public with no login** (a deliberate choice for this hackathon). Don't add secrets to it.
 - **Keep `dashboard/s390x_fix.py` imported** (theme.py does it). Without it every Plotly chart is
   garbage on IBM Z because of byte order.
-- **The AI/ML has to run on LinuxONE** for judging. Prefer local models (Hugging Face models via the
+- **The AI/ML has to run on LinuxONE** for judging. The chat's replies come from Claude (a cloud API, Elijah's
+  choice), but its MiniLM router and fallback, FinBERT and any forecaster run on LinuxONE. Prefer local models (Hugging Face models via the
   image's torch/transformers, the provided IBM Granite GGUF model via llama.cpp) over cloud AI APIs,
   and never call a model while a page is rendering: precompute and store, like Company Research does.
 
