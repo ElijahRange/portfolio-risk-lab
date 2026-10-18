@@ -25,7 +25,7 @@ notes in more detail; keep both in sync when you change something important.
 | Portfolio › Portfolio View | `/` | NAV, exposure, performance vs S&P 500, drawdown, positions | `views/overview.py` |
 | Portfolio › Factor Model | `/` | Multi-factor betas (ETF proxies), rolling beta | `views/factors.py` |
 | Portfolio › Idiosyncratic Risk | `/` | Single-index model vs SPX: systematic vs stock-specific return/risk, per-name drill-down | `views/idio.py`, `analytics._idiosyncratic` |
-| Portfolio › Risk Analysis | `/` | VaR/CVaR, drawdown, 3D PCA "risk geometry", risk contributors, correlations | `views/risk.py` |
+| Portfolio › Risk Analysis | `/` | VaR/ES by method (historical, normal, Cornish-Fisher, EWMA), EWMA VaR backtest (Kupiec), historical stress tests, risk budget, 3D PCA "risk geometry" with risk groups, diversification over time, up/down beta | `risk_metrics.py`, `views/risk.py` |
 | Ratio Testing | `/ratio-testing` | Optimizer (max Sharpe, min vol, min idio risk, max Sortino, risk parity, max diversification) + efficient frontier with custom weights | `optimizer.py`, `views/ratio_testing.py` |
 | Company Research | `/research` | Any US stock: earnings press releases from SEC EDGAR, scored by **Hugging Face FinBERT running on LinuxONE**; key points, guidance, tone trend, revenue/EPS, quotes, topics | `edgar.py`, `finbert.py`, `research_store.py`, `views/research.py` |
 | Model notes | `/notes` | Plain-English methodology for judges | `views/notes.py` |
