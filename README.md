@@ -6,6 +6,8 @@ IBM LinuxONE (s390x) virtual server.
 - **Live site:** http://148.100.98.18:8050 (team login; ask Elijah for the password)
 - **Stack:** Python 3.12 · Dash 4 · Plotly 7 · pandas · NumPy · Gunicorn · Podman
 
+**New here (or using an AI coding agent)? Start with [AGENTS.md](AGENTS.md).**
+
 ## How the team works on it
 
 GitHub `main` is the source of truth. The server pulls `main` every minute and the site
@@ -15,7 +17,8 @@ reloads by itself, so **push to `main` and the live site updates within about a 
 git clone https://github.com/ElijahRange/portfolio-risk-lab.git
 cd portfolio-risk-lab
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt numpy pandas requests
+pip install -r requirements.txt -r requirements-local.txt
+export SEC_USER_AGENT="Portfolio Risk Lab your.email@example.com"   # for Company Research
 DASH_AUTH_DISABLED=1 python app.py      # http://127.0.0.1:8050 on your laptop
 ```
 
@@ -28,7 +31,9 @@ Then commit and push (`git pull --rebase` first if someone else pushed).
 | `app.py` | Page shell (sidebar, header, tabs), routing and callbacks |
 | `dashboard/analytics.py` | All risk maths: betas, factor model, VaR, risk contributions, PCA |
 | `dashboard/data.py` | Reads the portfolio spreadsheet; downloads and caches daily prices |
-| `dashboard/views/` | One file per tab: `overview.py`, `factors.py`, `risk.py`, plus `notes.py` |
+| `dashboard/views/` | One file per page/tab: `overview.py`, `factors.py`, `idio.py`, `risk.py`, `ratio_testing.py`, `research.py`, `notes.py` |
+| `dashboard/optimizer.py` | Ratio Testing: SciPy portfolio optimizer and efficient frontier |
+| `dashboard/edgar.py`, `finbert.py`, `research_store.py` | Company Research: SEC EDGAR client, Hugging Face FinBERT, analysis + SQLite store |
 | `dashboard/components.py` | KPI tiles, cards, alerts, tables, number formatting |
 | `dashboard/theme.py`, `assets/style.css` | Colours, fonts and the Plotly chart theme |
 | `dashboard/config.py` | Factor ETF proxies, lookback windows, file locations |

@@ -1,0 +1,10 @@
+# Extra packages for running the app on a laptop (x86/ARM). The LinuxONE server image already ships
+# these, built for s390x, so they are deliberately NOT in requirements.txt.
+numpy
+pandas
+scipy
+scikit-learn
+requests
+beautifulsoup4
+torch
+transformers

@@ -1,5 +1,7 @@
 # Portfolio Risk Lab: notes for Claude
 
+Team-wide guide (also read by Codex and other agents): `AGENTS.md`. Keep both in sync.
+
 IBM Z Datathon project (team of four). A Dash dashboard that analyses the team's own
 stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**).
 
