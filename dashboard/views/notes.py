@@ -36,6 +36,11 @@ def layout():
                     "A small sentence-embedding model from Hugging Face (all-MiniLM-L6-v2) runs on LinuxONE alongside "
                     "it: it matches the question to the closest of about 30 question types to pick the related chart "
                     "and follow-up questions, and its template answers take over if the AI is unavailable."),
+            html.Li("Editing the portfolio: Portfolio > Edit portfolio changes holdings and dollar amounts (NAV is their "
+                    "total) or loads them from a spreadsheet. Every ticker is checked against Yahoo Finance and the "
+                    "whole analysis is run on the new portfolio before it is saved; earlier versions can be restored. "
+                    "Stocks outside the team's Bloomberg export are priced from Yahoo (5 years of history) and "
+                    "converted to US dollars at daily exchange rates."),
             html.Li("VaR (95%): the 1-day loss exceeded on only 5% of days in the window. "
                     "CVaR is the average loss on those worst days."),
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "

@@ -14,6 +14,8 @@ COLUMN_ALIASES = {
     "quantity": ["quantity", "shares", "qty", "position", "units"],
     "weight": ["weight", "weights", "allocation"],
     "sector": ["sector", "gics sector", "industry"],
+    "name": ["name", "company", "company name"],
+    "currency": ["currency", "ccy"],
 }
 
 _YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
@@ -54,7 +56,8 @@ def load_holdings(path: Path | None = None) -> pd.DataFrame:
     if "sector" not in df:
         df["sector"] = "Unclassified"
     df["sector"] = df["sector"].fillna("Unclassified").astype(str)
-    return df.groupby("ticker", as_index=False).agg(**{size: (size, "sum"), "sector": ("sector", "first")})
+    extra = {c: (c, "first") for c in ("name", "currency") if c in df}
+    return df.groupby("ticker", as_index=False).agg(**{size: (size, "sum"), "sector": ("sector", "first"), **extra})
 
 
 def size_positions(holdings: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
@@ -62,7 +65,8 @@ def size_positions(holdings: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame
     if "quantity" in holdings:
         return holdings
     h = holdings.copy()
-    dollars = h["weight"] / h["weight"].abs().sum() * config.PORTFOLIO_AUM
+    total = h["weight"].abs().sum()
+    dollars = h["weight"] if total > 100 else h["weight"] / total * config.PORTFOLIO_AUM  # dollars, or relative weights
     last = prices.ffill().iloc[-1]
     is_cash = h["ticker"].isin(config.CASH_TICKERS)
     h["quantity"] = dollars.where(is_cash, dollars / h["ticker"].map(last))
@@ -93,17 +97,33 @@ def load_bloomberg_prices(path: Path | None = None, sheet: str | None = None) ->
     return prices[~prices.eq(prices.shift()).all(axis=1)]
 
 
-def to_usd(local: pd.DataFrame, fx: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Divide non-USD prices by their FX rate (local currency per USD). Returns (prices, warnings)."""
+def fx_map(holdings: pd.DataFrame) -> dict[str, tuple[str, float]]:
+    """Non-USD holdings -> (Yahoo FX symbol quoting local currency per USD, sub-unit divisor).
+
+    From config.LOCAL_CURRENCY_FX plus the `currency` column the portfolio editor saves (e.g. GBp for London).
+    """
+    out = {t: (sym, 1.0) for t, sym in config.LOCAL_CURRENCY_FX.items()}
+    if "currency" in holdings:
+        for t, cur in holdings.set_index("ticker")["currency"].dropna().items():
+            cur, div = config.SUBUNIT_CURRENCIES.get(str(cur), (str(cur), 1.0))
+            if cur and cur.upper() != "USD" and t not in out:
+                out[t] = (f"{cur.upper()}=X", div)
+    return out
+
+
+def to_usd(local: pd.DataFrame, fx: pd.DataFrame, mapping: dict[str, tuple[str, float]] | None = None
+           ) -> tuple[pd.DataFrame, list[str]]:
+    """Convert non-USD prices to USD with their FX rate (local currency per USD). Returns (prices, warnings)."""
     out, warnings = local.copy(), []
-    for ticker, fx_symbol in config.LOCAL_CURRENCY_FX.items():
+    mapping = mapping if mapping is not None else {t: (s, 1.0) for t, s in config.LOCAL_CURRENCY_FX.items()}
+    for ticker, (fx_symbol, divisor) in mapping.items():
         if ticker not in out:
             continue
         if fx_symbol not in fx:
             warnings.append(f"No {fx_symbol} rate; {ticker} is shown in its local currency.")
             continue
         rate = fx[fx_symbol].reindex(out.index.union(fx.index)).ffill().reindex(out.index)
-        out[ticker] = out[ticker] / rate
+        out[ticker] = out[ticker] / divisor / rate
     return out, warnings
 
 
@@ -159,3 +179,34 @@ def load_prices(tickers, force: bool = False) -> tuple[pd.DataFrame, list[str]]:
     prices = pd.DataFrame(series).sort_index()
     prices = prices[~prices.index.duplicated(keep="last")].ffill()
     return prices, failed
+
+
+_quotes: dict = {}
+
+
+def quote(ticker: str) -> dict | None:
+    """Name, latest price, currency and USD price for a Yahoo ticker, or None if Yahoo doesn't know it (cached 1 h)."""
+    ticker = ticker.strip().upper()
+    hit = _quotes.get(ticker)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    try:
+        resp = _session.get(_YAHOO_URL.format(ticker=ticker), params={"range": "5d", "interval": "1d"}, timeout=10)
+        meta = resp.json()["chart"]["result"][0]["meta"] if resp.ok else None
+    except Exception:
+        return hit[1] if hit else None  # network trouble: keep the last answer rather than calling the ticker unknown
+    out = None
+    if meta and meta.get("regularMarketPrice"):
+        cur, div = config.SUBUNIT_CURRENCIES.get(meta.get("currency") or "USD", (meta.get("currency") or "USD", 1.0))
+        price = float(meta["regularMarketPrice"])
+        usd = price / div
+        if ticker.endswith("=X"):
+            usd = None  # an exchange rate itself (e.g. INR=X): nothing to convert
+        elif cur.upper() != "USD":
+            fx = quote(f"{cur.upper()}=X")
+            usd = usd / fx["price"] if fx and fx["price"] else None
+        out = {"ticker": ticker, "name": meta.get("longName") or meta.get("shortName") or ticker,
+               "price": price, "currency": meta.get("currency") or "USD", "usd_price": usd,
+               "type": meta.get("instrumentType"), "exchange": meta.get("fullExchangeName") or meta.get("exchangeName")}
+    _quotes[ticker] = (time.time(), out)
+    return out

@@ -122,10 +122,26 @@ def _research_symbols() -> set:
     return _library["symbols"]
 
 
+# Names of holdings added in the portfolio editor (the file's `name` column), filled by Data().
+_holding_names: dict[str, str] = {}
+_LEGAL = re.compile(r"[,.]?\s+(inc|incorporated|corp|corporation|co|company|plc|ltd|limited|holdings?|group|sa|ag|nv|se|"
+                    r"class [a-z])\.?$", re.I)
+
+
+def _short_name(name: str) -> str:
+    """'Apple Inc.' -> 'Apple', 'The Coca-Cola Company' -> 'Coca-Cola'."""
+    name = re.sub(r"^the\s+", "", name.strip(), flags=re.I)
+    for _ in range(3):
+        name = _LEGAL.sub("", name).strip()
+    return name
+
+
 def _patterns(holdings: list[str]) -> list[tuple[re.Pattern, str]]:
     out = []
     for t in holdings:
         names = [t, t.split(".")[0]] + COMPANIES.get(t, ("", []))[1]
+        if t not in COMPANIES and len(_short_name(_holding_names.get(t, ""))) >= 3:
+            names.append(_short_name(_holding_names[t]))
         for n in dict.fromkeys(names):
             sensitive = n in CASE_SENSITIVE
             tail = NOT_A_STOCK if n == "target" else ""
@@ -263,6 +279,8 @@ class Data:
     def __init__(self):
         self.a = service.current_analysis()
         self.p = self.a.positions.set_index("ticker")
+        if "name" in self.p:
+            _holding_names.update(self.p["name"].dropna().astype(str))
         self.nav = self.a.nav
 
     @cached_property
@@ -288,7 +306,7 @@ def _research_link(symbol: str) -> dict:
 
 
 def _name(t: str) -> str:
-    return COMPANIES[t][0] if t in COMPANIES else t
+    return COMPANIES[t][0] if t in COMPANIES else _short_name(_holding_names.get(t, t)) or t
 
 
 def _join(items) -> str:

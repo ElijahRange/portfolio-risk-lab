@@ -20,9 +20,23 @@ PORTFOLIO_FILES = [
 # Rows with these tickers are treated as cash (quantity = dollars).
 CASH_TICKERS = {"CASH", "$CASH", "USD"}
 
-# When the portfolio file gives a `weight` column instead of `quantity`, weights are
-# relative (any scale) and positions are sized so gross exposure equals this amount.
+# When the portfolio file gives a `weight` column instead of `quantity`: weights that add up to more than 100 are dollar
+# amounts (NAV = their total, which is what the on-page editor saves); smaller ones are relative and sized so gross
+# exposure equals PORTFOLIO_AUM.
 PORTFOLIO_AUM = 1_000_000
+
+# On-page portfolio editor (Portfolio page > Edit portfolio). It writes PORTFOLIO_FILE and keeps earlier versions.
+PORTFOLIO_FILE = PRIVATE_DIR / "portfolio.csv"
+PORTFOLIO_HISTORY_DIR = PRIVATE_DIR / "history"     # git-ignored with the rest of data/private
+PORTFOLIO_HISTORY_KEEP = 40
+PORTFOLIO_MAX_ROWS = 60
+SECTORS = ["Communication Services", "Consumer Discretionary", "Consumer Staples", "Energy", "Financials",
+           "Health Care", "Industrials", "Information Technology", "Materials", "Real Estate", "Utilities"]
+# Yahoo quotes some markets in a sub-unit (pence, cents): currency -> (Yahoo currency, divisor).
+SUBUNIT_CURRENCIES = {"GBp": ("GBP", 100), "GBX": ("GBP", 100), "ZAc": ("ZAR", 100), "ILA": ("ILS", 100)}
+# Bloomberg exchange code -> Yahoo suffix, for spreadsheets that use Bloomberg tickers ("TGT US Equity").
+BLOOMBERG_EXCHANGES = {"US": "", "UN": "", "UW": "", "IN": ".NS", "LN": ".L", "CN": ".TO", "JP": ".T", "GR": ".DE",
+                       "FP": ".PA", "HK": ".HK", "AU": ".AX", "SM": ".MC", "IM": ".MI", "NA": ".AS", "SW": ".SW"}
 
 BENCHMARK = "SPY"  # used when there is no Bloomberg file
 
@@ -59,7 +73,7 @@ FACTORS = {**STYLE_FACTORS, **SECTOR_FACTORS}
 TRADING_DAYS = 252
 LOOKBACK_DAYS = 252        # window for betas, volatility, VaR and correlations
 ROLLING_BETA_DAYS = 63     # about one quarter
-PRICE_HISTORY_RANGE = "2y"
+PRICE_HISTORY_RANGE = "5y"     # Yahoo history for holdings outside the Bloomberg file (covers the 2022 stress test)
 PRICE_CACHE_MAX_AGE_HOURS = 12
 MIN_HISTORY_COVERAGE = 0.6  # drop tickers with less than 60% of the lookback window
 
@@ -119,6 +133,11 @@ def _env_file_value(name: str) -> str | None:
             if line.strip().startswith(f"{name}="):
                 return line.split("=", 1)[1].strip().strip("'\"") or None
     return None
+
+
+def edit_passcode() -> str | None:
+    """Team passcode for saving portfolio changes on the site (PORTFOLIO_EDIT_PASSCODE in .env). Never display it."""
+    return _env_file_value("PORTFOLIO_EDIT_PASSCODE")
 
 
 def anthropic_api_key() -> str | None:

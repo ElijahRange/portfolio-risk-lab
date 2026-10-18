@@ -30,13 +30,14 @@ notes in more detail; keep both in sync when you change something important.
 | Ratio Testing | `/ratio-testing` | Optimizer (max Sharpe, min vol, min idio risk, max Sortino, risk parity, max diversification) + efficient frontier with custom weights | `optimizer.py`, `views/ratio_testing.py` |
 | Company Research | `/research` | Any US stock: earnings press releases from SEC EDGAR, scored by **Hugging Face FinBERT running on LinuxONE**; key points, guidance, tone trend, revenue/EPS, quotes, topics | `edgar.py`, `finbert.py`, `research_store.py`, `views/research.py` |
 | Model notes | `/notes` | Plain-English methodology for judges | `views/notes.py` |
+| Portfolio › Edit portfolio | `/` (button) | Change holdings and dollar amounts, or load them from a spreadsheet; passcode to save; earlier versions can be restored | `portfolio_store.py`, `views/portfolio_editor.py` |
 | Portfolio assistant | every page (bottom-right bubble) | Answers free-form questions about the portfolio. **Claude (Anthropic API)** writes the reply from a snapshot of the dashboard's numbers; **Hugging Face MiniLM on LinuxONE** picks the related chart and is the offline fallback (template answers) | `ai_chat.py`, `assistant.py`, `views/chat.py`, `assets/chat.js` |
 
 **Data:**
 - Prices come from the team's Bloomberg export (VZ, MMM, RELIANCE (converted INR→USD), WMT, TPB,
   TGT, CB, BA, PM, plus SPX).
-- Real position sizes (dollar amounts, $1,000,000 total) live only in the git-ignored
-  `data/private/portfolio.csv` on the server. Ask Elijah for them; never write them into the repo.
+- Real position sizes (dollar amounts) live only in the git-ignored `data/private/portfolio.csv` on the server.
+  Change them on the site (Portfolio › Edit portfolio, team passcode), not in the repo; never commit them.
 - Without those private files (e.g. on your laptop), the app falls back to `data/sample_portfolio.csv`
   and public Yahoo prices.
 

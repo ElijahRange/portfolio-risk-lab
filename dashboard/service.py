@@ -15,37 +15,50 @@ def _key():
 
 
 def _prices(holdings: pd.DataFrame, force: bool):
-    """Return (prices, benchmark, failed tickers, warnings, price source label)."""
+    """Return (prices in USD, benchmark, failed tickers, warnings, price source label)."""
     tickers = set(holdings["ticker"]) - config.CASH_TICKERS
     factors = set(config.FACTORS.values())
+    fx = data.fx_map(holdings)                       # non-USD holding -> (Yahoo FX symbol, sub-unit divisor)
+    fx_symbols = {sym for t, (sym, _) in fx.items() if t in tickers}
 
     if not config.BLOOMBERG_FILE.exists():
-        prices, failed = data.load_prices(tickers | factors | {config.BENCHMARK}, force=force)
-        return prices, config.BENCHMARK, failed, [], "Yahoo prices"
+        prices, failed = data.load_prices(tickers | factors | fx_symbols | {config.BENCHMARK}, force=force)
+        prices, warnings = data.to_usd(prices, prices, fx)
+        prices = prices.drop(columns=[c for c in fx_symbols if c in prices and c not in tickers])
+        return prices, config.BENCHMARK, failed, warnings, "Yahoo prices"
 
     local = data.load_bloomberg_prices()
-    fx_symbols = {config.LOCAL_CURRENCY_FX[t] for t in local.columns if t in config.LOCAL_CURRENCY_FX}
     extra = tickers - set(local.columns)  # holdings that aren't in the Bloomberg file
     web, failed = data.load_prices(factors | fx_symbols | extra, force=force)
-    local, warnings = data.to_usd(local, web)
+    local, warnings = data.to_usd(local, web, fx)
+    web, more = data.to_usd(web, web, {t: m for t, m in fx.items() if t in extra})
     # Put the downloaded series on the Bloomberg calendar.
-    web = web.drop(columns=[c for c in fx_symbols if c in web])
+    web = web.drop(columns=[c for c in fx_symbols if c in web and c not in tickers])
     web = web.reindex(local.index.union(web.index)).ffill().reindex(local.index)
-    return local.join(web), config.BLOOMBERG_BENCHMARK, failed, warnings, config.BLOOMBERG_FILE.name
+    return local.join(web), config.BLOOMBERG_BENCHMARK, failed, warnings + more, config.BLOOMBERG_FILE.name
+
+
+def _analyse(path, force: bool = False) -> analytics.Analysis:
+    holdings = data.load_holdings(path)
+    prices, benchmark, failed, warnings, price_source = _prices(holdings, force)
+    if benchmark not in prices:
+        raise RuntimeError(f"Could not load benchmark prices ({benchmark}).")
+    holdings = data.size_positions(holdings, prices)
+    result = analytics.build(holdings, prices, source=f"{path.name} · {price_source}",
+                             failed=failed, benchmark=benchmark)
+    result.warnings[:0] = warnings
+    return result
 
 
 def current_analysis(force_refresh: bool = False) -> analytics.Analysis:
     with _lock:
         if not force_refresh and _memo["key"] == _key():
             return _memo["value"]
-        path = data.portfolio_path()
-        holdings = data.load_holdings(path)
-        prices, benchmark, failed, warnings, price_source = _prices(holdings, force_refresh)
-        if benchmark not in prices:
-            raise RuntimeError(f"Could not load benchmark prices ({benchmark}).")
-        holdings = data.size_positions(holdings, prices)
-        result = analytics.build(holdings, prices, source=f"{path.name} · {price_source}",
-                                 failed=failed, benchmark=benchmark)
-        result.warnings[:0] = warnings
+        result = _analyse(data.portfolio_path(), force_refresh)
         _memo.update(key=_key(), value=result)
         return result
+
+
+def check(path) -> analytics.Analysis:
+    """Analyse a candidate portfolio file without touching the cached one (the editor runs this before saving)."""
+    return _analyse(path)

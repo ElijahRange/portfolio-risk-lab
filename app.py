@@ -7,11 +7,13 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
+from dash import ALL, MATCH, Dash, Input, Output, State, ctx, dcc, html, no_update
+from flask import request
 
 from dashboard import components as ui
-from dashboard import ai_chat, assistant, config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
-from dashboard.views import chat, factors, idio, notes, overview, ratio_testing, research, risk, sky
+from dashboard import ai_chat, assistant, config, finbert, portfolio_store, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
+from dashboard.views import (chat, factors, idio, notes, overview, portfolio_editor, ratio_testing, research, risk,
+                             sky)
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
@@ -64,7 +66,8 @@ def portfolio_page(tab: str = "overview"):
     return html.Div([
         html.Div([
             html.Div([html.H2("Portfolio", className="page-title"), html.Div(id="source-line", className="muted small")]),
-            html.Button("Refresh prices", id="refresh", className="btn"),
+            html.Div([portfolio_editor.open_button(), html.Button("Refresh prices", id="refresh", className="btn")],
+                     className="page-actions"),
         ], className="page-head"),
         html.Div(id="alerts"),
         dcc.Tabs(
@@ -88,6 +91,7 @@ app.layout = html.Div([
         ], className="main"),
     ], className="shell"),
     chat.layout(),  # outside the routed page, so the assistant stays open across pages and tabs
+    portfolio_editor.dialog(),  # opened from the Portfolio page; top level so it covers the header and sidebar
 ])
 
 
@@ -283,6 +287,85 @@ def healthz():
     if out.get("intent") == "var" and out.get("value"):
         return "ok", 200, {"Content-Type": "text/plain"}
     return f"unhealthy: {out.get('text')}", 503, {"Content-Type": "text/plain"}
+
+
+# ---------- Portfolio editor (Portfolio page > Edit portfolio) ----------
+
+PE_ROWS = [State({"type": "pe-ticker", "index": ALL}, "value"), State({"type": "pe-amount", "index": ALL}, "value"),
+           State({"type": "pe-sector", "index": ALL}, "value")]
+
+
+def _pe_rows(tickers, amounts, sectors) -> list[dict]:
+    return [{"ticker": t, "dollars": a, "sector": s} for t, a, s in zip(tickers, amounts, sectors)]
+
+
+@app.callback(Output("pe-rows", "children"), Output("pe-history", "options"), Output("pe-overlay", "className"),
+              Output("pe-status", "children"), Input("pe-open", "n_clicks"), prevent_initial_call=True)
+def pe_open(_):
+    try:
+        rows, status = portfolio_store.current_rows(service.current_analysis()), None
+    except Exception as exc:
+        rows, status = [], ui.alert("Couldn't load the current portfolio", f"{type(exc).__name__}: {exc}", "warn")
+    return portfolio_editor.rows(rows), portfolio_store.history(), "pe-overlay open", status
+
+
+app.clientside_callback("function() { return 'pe-overlay'; }",
+                        Output("pe-overlay", "className", allow_duplicate=True), Input("pe-close", "n_clicks"),
+                        prevent_initial_call=True)
+
+
+@app.callback(Output("pe-rows", "children", allow_duplicate=True), Output("pe-status", "children", allow_duplicate=True),
+              Output("pe-upload", "contents"),
+              Input("pe-add", "n_clicks"), Input({"type": "pe-remove", "index": ALL}, "n_clicks"),
+              Input("pe-upload", "contents"), State("pe-upload", "filename"), *PE_ROWS, prevent_initial_call=True)
+def pe_edit_rows(_add, _remove, contents, filename, tickers, amounts, sectors):
+    rows, trig = _pe_rows(tickers, amounts, sectors), ctx.triggered_id
+    if trig == "pe-add":
+        return portfolio_editor.rows(rows + [{}]), no_update, no_update
+    if trig == "pe-upload" and contents:
+        try:
+            a = service.current_analysis()
+            known = dict(zip(a.positions["ticker"], a.positions["sector"]))
+            new, note = portfolio_store.parse_upload(contents, filename or "the file", a.nav, known)
+        except portfolio_store.EditError as exc:
+            return no_update, ui.alert("Couldn't use that file", str(exc), "warn"), None
+        return portfolio_editor.rows(new), ui.alert("Spreadsheet loaded", note, "info"), None
+    if isinstance(trig, dict) and ctx.triggered[0]["value"]:  # a remove button (not a re-render of the rows)
+        return portfolio_editor.rows([r for i, r in enumerate(rows) if i != trig["index"]]), no_update, no_update
+    return no_update, no_update, no_update
+
+
+@app.callback(Output({"type": "pe-info", "index": MATCH}, "children"), Input({"type": "pe-ticker", "index": MATCH}, "value"))
+def pe_lookup(ticker):
+    try:
+        return portfolio_editor.ticker_info(ticker)
+    except Exception:
+        return None
+
+
+@app.callback(Output("pe-total", "children"), Input({"type": "pe-amount", "index": ALL}, "value"))
+def pe_total(amounts):
+    return portfolio_editor.total_line(amounts)
+
+
+@app.callback(Output("pe-status", "children", allow_duplicate=True), Output("refreshed-at", "data", allow_duplicate=True),
+              Output("pe-history", "options", allow_duplicate=True), Output("pe-rows", "children", allow_duplicate=True),
+              Output("pe-pass", "value"),
+              Input("pe-save", "n_clicks"), Input("pe-pass", "n_submit"), Input("pe-restore", "n_clicks"),
+              State("pe-history", "value"), State("pe-pass", "value"), *PE_ROWS, prevent_initial_call=True)
+def pe_save(_save, _submit, _restore, version, passcode, tickers, amounts, sectors):
+    visitor = request.remote_addr or "?"
+    try:
+        if ctx.triggered_id == "pe-restore":
+            message = portfolio_store.restore(version, passcode, visitor)
+        else:
+            message = portfolio_store.save(_pe_rows(tickers, amounts, sectors), passcode, visitor)
+        rows = portfolio_editor.rows(portfolio_store.current_rows(service.current_analysis()))
+    except portfolio_store.EditError as exc:
+        return ui.alert("Not saved", str(exc), "warn"), no_update, no_update, no_update, no_update
+    except Exception as exc:
+        return ui.alert("Not saved", f"{type(exc).__name__}: {exc}", "error"), no_update, no_update, no_update, no_update
+    return ui.alert(message, tone="ok"), time.time(), portfolio_store.history(), rows, ""
 
 
 # ---------- Portfolio assistant (chat bubble on every page) ----------

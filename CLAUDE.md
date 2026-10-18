@@ -92,6 +92,23 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   - To add a question type: write a handler `h_x(q, d)` returning `_ans(...)`, add an `Intent` with 5–8
     example phrasings, then add paraphrases to the check script.
   - Portfolio tabs can be deep-linked: `/?tab=overview|factors|idio|risk` (`route()` reads `url.search`).
+- Portfolio editor: **Portfolio > Edit portfolio** (`views/portfolio_editor.py`, dialog mounted at the top of
+  `app.layout`; callbacks `pe_*` in `app.py`; backend `dashboard/portfolio_store.py`).
+  - Rows of ticker / dollars / sector; live Yahoo lookup per ticker (`data.quote`, cached 1 h); spreadsheet upload
+    (Excel/CSV with ticker + dollars, weights or shares; Bloomberg tickers like `TGT US Equity` are converted) fills
+    the table for review only.
+  - Save needs the team passcode (`PORTFOLIO_EDIT_PASSCODE` in `.env`, constant-time compare, 5 wrong tries per IP
+    per 15 min). It validates every row, runs `service.check()` (the full analysis) on the candidate file, copies
+    the old file to `data/private/history/portfolio-<time>.csv` (last 40 kept), then atomically replaces
+    `data/private/portfolio.csv`. The service cache keys on the file's mtime, so every page and the chat update.
+    "Restore" re-saves an earlier version through the same checks.
+  - The file now has `ticker, weight, sector, name, currency`; `weight` = dollars (if the weights add up to more than
+    100 they're dollars and NAV is their total; otherwise relative and scaled to `PORTFOLIO_AUM`).
+  - Non-USD holdings: `data.fx_map()` uses the saved `currency` (and `LOCAL_CURRENCY_FX`), handles sub-units like
+    GBp (pence), and `service._prices` converts Bloomberg and Yahoo prices alike. Yahoo history is 5 years.
+  - The assistant learns new companies' names from the `name` column (`assistant._holding_names`).
+  - Testing a save in a preview: mount a **copy** of `data/private` (saving writes the real file otherwise) and
+    pass a throwaway `-e PORTFOLIO_EDIT_PASSCODE=...`.
 - `dashboard/data.py`: reads the portfolio file (flexible column aliases; `CASH` row =
   dollars; negative quantity = short). Prices come from Yahoo's public chart endpoint and
   are cached per ticker as CSV in `data/cache/` for 12 hours.
@@ -178,7 +195,7 @@ the raw file. The file has **prices only, no position sizes**.
 ## Status (2026-10-17)
 
 - Live: dashboard on the team's data, GitHub repo + auto-sync, team invites sent.
-- **Portfolio:** `data/private/portfolio.csv` on the server (git-ignored) holds the team's real position
+- **Portfolio:** editable on the site since 2026-10-18 (Edit portfolio, passcode-protected). `data/private/portfolio.csv` on the server (git-ignored) holds the team's real position
   sizes since 2026-10-17: the `weight` column is each position's dollar amount, and they sum to
   `PORTFOLIO_AUM = 1_000_000`, so sizing is exact. The old equal-weight file is kept as
   `portfolio_equal_weight_backup.csv.bak`.
