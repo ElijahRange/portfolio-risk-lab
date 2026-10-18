@@ -25,11 +25,11 @@ def layout():
                     "(max Sharpe, min volatility, min idiosyncratic risk, max Sortino, risk parity, max "
                     "diversification) within the weight limits. The efficient frontier is the lowest-volatility "
                     "mix for each level of expected return. All of it is fit on past returns (in-sample)."),
-            html.Li("Company research: earnings-call transcripts come from Alpha Vantage, with its sentiment score "
-                    "(0 to 1) for every speaker turn. When a call is fetched, an NLP pass splits prepared remarks from "
-                    "Q&A, picks key sentences (numbers, guidance, results, and terms that are new versus the "
-                    "company's other calls, via TF-IDF), lists analysts' questions, and counts hedging and tone "
-                    "words. Results are stored, so the page reads them instantly."),
+            html.Li("Company research: for any US-listed company, the last earnings press releases (8-K, Item "
+                    "2.02, exhibit 99.1) come from SEC EDGAR and reported revenue/EPS from SEC XBRL data. FinBERT, a "
+                    "financial-sentiment model from Hugging Face, runs on LinuxONE and scores the most informative "
+                    "sentences and executive quotes as positive, negative or neutral. Key points, guidance and "
+                    "'new this quarter' topics (TF-IDF) are picked from those, then stored so pages open instantly."),
             html.Li("VaR (95%): the 1-day loss exceeded on only 5% of days in the window. "
                     "CVaR is the average loss on those worst days."),
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "

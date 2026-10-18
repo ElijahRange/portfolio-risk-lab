@@ -67,22 +67,31 @@ RISK_FREE_RATE = 0.04            # annual; default for Sharpe/Sortino, editable 
 OPT_LOOKBACKS = {"1Y": 252, "3Y": 756, "Full": None}  # None = all history in the price file
 FRONTIER_POINTS = 30
 
-# Company Research page: earnings calls from Alpha Vantage, analysed once and stored locally.
-RESEARCH_DB = DATA_DIR / "research" / "research.db"  # git-ignored: licensed transcript text
-ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
-ALPHAVANTAGE_PAUSE = 1.2      # seconds between requests (free plan rate limit)
-RESEARCH_QUARTERS = 4         # latest calls fetched per company
-RESEARCH_KEY_POINTS = 8       # key sentences kept per call
-TONE_GOOD, TONE_BAD = 0.5, 0.2  # Alpha Vantage turn sentiment (0 to 1) thresholds for colours
+# Company Research page: earnings press releases from SEC EDGAR (any US-listed company), scored by the
+# FinBERT model from Hugging Face running locally on LinuxONE. Results are stored so pages open instantly.
+RESEARCH_DB = DATA_DIR / "research" / "edgar.db"     # git-ignored
+MODELS_DIR = DATA_DIR / "models"                     # git-ignored Hugging Face cache (HF_HOME)
+FINBERT_MODEL = "ProsusAI/finbert"
+NLP_THREADS = 3               # CPU threads for FinBERT (the VM has 3 cores)
+NLP_MAX_SENTENCES = 28        # sentences FinBERT scores per release (keeps a new company to a few seconds)
+RESEARCH_RELEASES = 4         # latest earnings releases kept per company
+RESEARCH_KEY_POINTS = 8
+RESEARCH_REFRESH_HOURS = 24   # re-check EDGAR for new releases after this long
+SEC_MIN_INTERVAL = 0.12       # seconds between SEC requests (SEC allows 10 per second)
 
 
-def alphavantage_key() -> str | None:
-    """ALPHAVANTAGE_API_KEY from the environment, or from .env (read live, so no restart is needed)."""
-    if os.environ.get("ALPHAVANTAGE_API_KEY"):
-        return os.environ["ALPHAVANTAGE_API_KEY"].strip()
+def _env_file_value(name: str) -> str | None:
+    """A variable from the environment, or from .env (read live, so no restart is needed)."""
+    if os.environ.get(name):
+        return os.environ[name].strip()
     env = ROOT / ".env"
     if env.exists():
         for line in env.read_text().splitlines():
-            if line.strip().startswith("ALPHAVANTAGE_API_KEY="):
+            if line.strip().startswith(f"{name}="):
                 return line.split("=", 1)[1].strip().strip("'\"") or None
     return None
+
+
+def sec_user_agent() -> str | None:
+    """SEC requires a User-Agent with a contact email on every automated request (SEC_USER_AGENT in .env)."""
+    return _env_file_value("SEC_USER_AGENT")

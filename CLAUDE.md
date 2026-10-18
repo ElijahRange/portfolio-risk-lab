@@ -39,12 +39,18 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   then solves six objectives with SciPy SLSQP (max Sharpe, min vol, min idiosyncratic risk, max Sortino,
   risk parity, max diversification), the efficient frontier and a random-portfolio cloud. Results are
   cached per settings. Page: `views/ratio_testing.py` at `/ratio-testing`; callbacks in `app.py`.
-- `dashboard/transcripts.py`: Company Research data. `ingest(symbol)` pulls Alpha Vantage OVERVIEW, EARNINGS
-  and EARNINGS_CALL_TRANSCRIPT (fiscal quarter labels), stores them in SQLite at `data/research/research.db`
-  (git-ignored, licensed text) and runs a one-off NLP pass per call (sections, tone, key points, guidance,
-  analyst questions, TF-IDF topics). The page (`views/research.py`, `/research`) only reads the DB, so it
-  is instant. Preload with `scripts/research_fetch.py`. Key: `ALPHAVANTAGE_API_KEY` in `.env` (read live).
-  Free plan = 25 requests/day; a new company costs 2 + 4 requests.
+- Company Research (`/research`, `views/research.py`) works for **any US-listed company**:
+  - `dashboard/edgar.py`: SEC EDGAR client (free, no key; needs `SEC_USER_AGENT` with a contact email in
+    `.env`, max 10 req/s). Ticker/name lookup, latest earnings 8-Ks (Item 2.02), the EX-99.1 press release,
+    and quarterly revenue / net income / EPS from XBRL company facts.
+  - `dashboard/finbert.py`: Hugging Face `ProsusAI/finbert` run locally on LinuxONE (CPU, 3 threads),
+    cached in `data/models` (git-ignored). Page requests get priority over background work.
+  - `dashboard/research_store.py`: SQLite at `data/research/edgar.db` (git-ignored). `ensure(query)`
+    analyses the newest release at once (about 8 s for a new company) and older ones in a background
+    thread; the page polls until they finish. Stored companies open in well under a second.
+  - Preload demo companies: `podman exec dashboard .venv/bin/python scripts/research_preload.py [TICKERS]`.
+  - Limits: press releases, not call transcripts (no analyst Q&A); foreign filers on Form 6-K
+    (e.g. RELIANCE) aren't covered.
 - `dashboard/data.py`: reads the portfolio file (flexible column aliases; `CASH` row =
   dollars; negative quantity = short). Prices come from Yahoo's public chart endpoint and
   are cached per ticker as CSV in `data/cache/` for 12 hours.

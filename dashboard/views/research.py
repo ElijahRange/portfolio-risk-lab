@@ -1,7 +1,7 @@
-"""Company Research page: a library of companies whose earnings calls were fetched and analysed ahead of time.
+"""Company Research page: any US-listed company's earnings releases from SEC EDGAR, scored by FinBERT.
 
-Everything shown here is read from the local research database (dashboard/transcripts.py), so the page
-opens instantly. Only the "Add company" button talks to Alpha Vantage.
+Companies already looked up open instantly from the local database (dashboard/research_store.py).
+A new company takes a few seconds: its newest release is analysed at once, older ones in the background.
 """
 from datetime import datetime
 from urllib.parse import parse_qs
@@ -10,25 +10,24 @@ import plotly.graph_objects as go
 from dash import dcc, html
 
 from .. import components as ui
-from .. import config
-from .. import transcripts as tr
+from .. import research_store as rs
 from ..theme import C
 
-ROLE_COLORS = {"Executive": C["primary"], "IR": C["violet"], "Analyst": C["warn"], "Operator": C["muted"]}
+TONE_CLASS = {"positive": "good", "negative": "bad", "neutral": "neutral"}
 
 
-def qlabel(quarter: str | None) -> str:
-    return f"{quarter[4:]} {quarter[:4]}" if quarter else "–"
-
-
-def tone_class(x: float | None) -> str:
+def net_class(x: float | None) -> str:
     if x is None:
         return "neutral"
-    return "good" if x >= config.TONE_GOOD else ("bad" if x <= config.TONE_BAD else "neutral")
+    return "good" if x >= 0.15 else ("bad" if x <= -0.05 else "neutral")
 
 
-def tone_text(x: float | None) -> str:
-    return "–" if x is None else f"{x:.2f}"
+def net_text(x: float | None) -> str:
+    return "–" if x is None else f"{x:+.2f}"
+
+
+def _date(d: str | None) -> str:
+    return datetime.strptime(d, "%Y-%m-%d").strftime("%b %d, %Y") if d else ""
 
 
 def _score(label: str, value: str, tone: str = "neutral"):
@@ -36,333 +35,266 @@ def _score(label: str, value: str, tone: str = "neutral"):
                     className="score")
 
 
-def _date(d: str | None) -> str:
-    if not d:
-        return ""
-    return datetime.strptime(d, "%Y-%m-%d").strftime("%b %d, %Y")
+def _chip(text: str, cls: str = ""):
+    return html.Span(text, className=f"chip {cls}".strip())
 
 
 # ---------- page shell ----------
 
 def parse_search(search: str | None) -> dict:
     q = parse_qs((search or "").lstrip("?"))
-    return {"symbol": (q.get("symbol") or [None])[0], "quarter": (q.get("quarter") or [None])[0]}
+    return {"symbol": (q.get("symbol") or [None])[0], "release": None}
 
 
 def layout(search: str | None = None):
-    lib = tr.library()
     return html.Div([
         html.Div([
             html.Div([
                 html.H2("Company research", className="page-title"),
-                html.Div("Earnings calls from Alpha Vantage, analysed once on LinuxONE and stored, so every page "
-                         "opens instantly.", className="muted small"),
+                html.Div("Earnings press releases from SEC EDGAR for any US-listed company, scored by FinBERT "
+                         "(Hugging Face) running on LinuxONE. Companies you've opened before load instantly.",
+                         className="muted small"),
             ]),
         ], className="page-head"),
         dcc.Store(id="rs-selected", data=parse_search(search)),
         dcc.Store(id="rs-fetched"),
+        dcc.Interval(id="rs-poll", interval=3000, disabled=True),
         html.Div([
-            html.Div([
-                dcc.Input(id="rs-search", type="text", list="rs-names", debounce=True, className="search-input",
-                          placeholder="Search the library: ticker or company name"),
-                html.Datalist([html.Option(value=c["symbol"], label=c["name"]) for c in lib], id="rs-names"),
-                html.Button("Open", id="rs-open", className="btn"),
-            ], className="search-row"),
-            html.Div([
-                dcc.Input(id="rs-add", type="text", debounce=True, className="num-input add-input",
-                          placeholder="Ticker"),
-                html.Button("Fetch calls", id="rs-add-btn", className="btn btn-primary"),
-            ], className="search-row add-row", title="Download a company's latest earnings calls from Alpha "
-                                                     "Vantage and analyse them"),
-        ], className="research-bar"),
-        dcc.Loading(html.Div(id="rs-add-status"), type="dot", color=C["primary"]),
+            dcc.Input(id="rs-search", type="text", debounce=True, className="search-input",
+                      placeholder="Any US stock: ticker or company name (e.g. TPB, Walmart)"),
+            html.Button("Research", id="rs-go", className="btn btn-primary"),
+        ], className="search-row research-bar"),
+        dcc.Loading(html.Div(id="rs-status"), type="dot", color=C["primary"]),
         html.Div(id="rs-body"),
     ])
 
 
-def resolve(text: str | None) -> str | None:
-    """Ticker or (part of a) company name -> ticker in the library."""
-    if not text:
-        return None
-    t = text.strip().lower()
-    lib = tr.library()
-    for c in lib:
-        if c["symbol"].lower() == t:
-            return c["symbol"]
-    for c in lib:
-        if t in (c["name"] or "").lower():
-            return c["symbol"]
-    return None
-
-
 def body(selected: dict | None):
     symbol = (selected or {}).get("symbol")
-    if symbol:
-        return company_view(symbol, (selected or {}).get("quarter"))
-    return library_view()
+    return company_view(symbol, (selected or {}).get("release")) if symbol else library_view()
 
 
 # ---------- library ----------
 
 def library_view():
-    lib = tr.library()
+    lib = rs.library()
     if not lib:
-        return ui.card("Library", html.Div([
-            html.P("No companies yet. Type a ticker in the box on the right and press Fetch calls.", className="muted"),
-            html.P(f"Each new company uses {2 + config.RESEARCH_QUARTERS} Alpha Vantage requests (company profile, "
-                   f"earnings dates and the last {config.RESEARCH_QUARTERS} calls). The free plan allows 25 a day.",
-                   className="muted small"),
-        ]))
-    rows = []
-    for c in lib:
-        surprise = c["eps_surprise"]
-        rows.append(html.Div([
-            html.Div([
-                html.Div(c["name"], className="lib-name"),
-                html.Div(" · ".join(x for x in (c["symbol"], c["sector"]) if x), className="muted small mono"),
-            ]),
-            html.Div([
-                _score("CALLS", str(c["calls"])),
-                _score("LATEST", qlabel(c["latest"])),
-                _score("TONE", tone_text(c["tone"]), tone_class(c["tone"])),
-                _score("Δ TONE", "–" if c["tone_change"] is None else f"{c['tone_change']:+.2f}",
-                       "neutral" if c["tone_change"] is None else ("good" if c["tone_change"] > 0.02 else
-                                                                   "bad" if c["tone_change"] < -0.02 else "neutral")),
-                _score("EPS SURP.", "–" if surprise is None else f"{surprise:+.1f}%",
-                       "neutral" if surprise is None else ("good" if surprise > 0 else "bad")),
-            ], className="score-row"),
-        ], id={"type": "rs-company", "index": c["symbol"]}, n_clicks=0, className="lib-row"))
+        return ui.card("Library", html.P("Nothing looked up yet. Search any US stock above.", className="muted"))
+    rows = [html.Div([
+        html.Div([
+            html.Div(c["name"], className="lib-name"),
+            html.Div(" · ".join(x for x in (c["symbol"], c["exchange"], c["sic"]) if x), className="muted small mono"),
+        ]),
+        html.Div([
+            _score("RELEASES", str(c["releases"])),
+            _score("LATEST", _date(c["latest"]) or "–"),
+            _score("TONE", net_text(c["tone"]), net_class(c["tone"])),
+            _score("Δ TONE", net_text(c["tone_change"]),
+                   "neutral" if c["tone_change"] is None else ("good" if c["tone_change"] > 0.05 else
+                                                               "bad" if c["tone_change"] < -0.05 else "neutral")),
+            _score("REV YOY", "–" if c["revenue_yoy"] is None else ui.pct(c["revenue_yoy"], 1, signed=True),
+                   "neutral" if c["revenue_yoy"] is None else ("good" if c["revenue_yoy"] > 0 else "bad")),
+        ], className="score-row"),
+    ], id={"type": "rs-company", "index": c["symbol"]}, n_clicks=0, className="lib-row") for c in lib]
     return ui.card("Library", html.Div(rows, className="lib-list"),
-                   f"{len(lib)} companies. Click one to open its research page. Tone = Alpha Vantage's sentiment "
-                   "score for management's remarks on the latest call (0 = negative, 1 = positive).")
+                   f"{len(lib)} companies looked up so far. Tone = FinBERT's average (positive minus negative) "
+                   "over the latest release's key sentences, from −1 to +1.")
 
 
-# ---------- company ----------
+# ---------- charts ----------
 
-def tone_trend_figure(calls: list[dict]) -> go.Figure:
-    cs = [c for c in reversed(calls) if c["available"]]
-    x = [qlabel(c["quarter"]) for c in cs]
+def tone_trend_figure(releases: list[dict]) -> go.Figure:
+    done = [r for r in reversed(releases) if r["tone"]]
+    x = [_date(r["filing_date"]) for r in done]
     fig = go.Figure()
-    for key, name, color in (("prepared", "Management, prepared", C["primary"]),
-                             ("answers", "Management, Q&A answers", C["violet"]),
-                             ("analysts", "Analysts' questions", C["warn"])):
-        fig.add_scatter(x=x, y=[c["tone"][key] for c in cs], name=name, mode="lines+markers",
-                        line=dict(color=color, width=2), marker=dict(size=7),
-                        hovertemplate="%{x}<br>%{y:.2f}<extra>" + name + "</extra>")
-    fig.update_yaxes(range=[0, 1], title=dict(text="Sentiment (0–1)"))
-    fig.update_layout(hovermode="x unified", margin=dict(l=56, r=16, t=36, b=36))
+    fig.add_bar(x=x, y=[r["tone"]["positive"] for r in done], name="Positive sentences", marker_color=C["pos"],
+                opacity=0.55, hovertemplate="%{x}<br>%{y:.0%} positive<extra></extra>")
+    fig.add_bar(x=x, y=[-r["tone"]["negative"] for r in done], name="Negative sentences", marker_color=C["neg"],
+                opacity=0.55, customdata=[r["tone"]["negative"] for r in done],
+                hovertemplate="%{x}<br>%{customdata:.0%} negative<extra></extra>")
+    fig.add_scatter(x=x, y=[r["tone"]["net"] for r in done], name="Net tone", mode="lines+markers",
+                    line=dict(color=C["text"], width=2), marker=dict(size=8),
+                    hovertemplate="%{x}<br>net %{y:+.2f}<extra></extra>")
+    fig.update_yaxes(range=[-1, 1], tickformat="+.1f", zeroline=True, zerolinecolor=C["muted"])
+    fig.update_layout(barmode="relative", margin=dict(l=48, r=16, t=36, b=36), hovermode="x unified")
     return fig
 
 
-def call_timeline_figure(analysis: dict) -> go.Figure:
-    tl = analysis["timeline"]
+def financials_figure(fin: dict) -> go.Figure:
     fig = go.Figure()
-    qa = [t["i"] for t in tl if t["section"] == "Q&A"]
-    if qa:
-        fig.add_vrect(x0=min(qa) + 0.5, x1=max(qa) + 1.5, fillcolor=C["surface_2"], line_width=0, layer="below",
-                      annotation_text="Q&A", annotation_position="top left",
-                      annotation_font=dict(color=C["muted"], size=10))
-    for role, color in ROLE_COLORS.items():
-        pts = [t for t in tl if t["role"] == role and t["sentiment"] is not None]
-        if not pts:
-            continue
-        fig.add_bar(x=[t["i"] + 1 for t in pts], y=[t["sentiment"] for t in pts], name=role, marker_color=color,
-                    width=0.8,
-                    customdata=[[t["speaker"], t["words"]] for t in pts],
-                    hovertemplate="turn %{x} · %{customdata[0]}<br>sentiment %{y:.1f} · %{customdata[1]} words"
-                                  "<extra></extra>")
-    fig.update_yaxes(range=[0, 1])
-    fig.update_xaxes(title=dict(text="Speaker turn"))
-    fig.update_layout(barmode="overlay", bargap=0.15, margin=dict(l=40, r=16, t=36, b=40))
+    fig.add_bar(x=fin["quarters"], y=fin["revenue"], name="Revenue", marker_color=C["primary"],
+                hovertemplate="%{x}<br>revenue $%{y:,.0f}<extra></extra>")
+    if any(v is not None for v in fin.get("eps", [])):
+        fig.add_scatter(x=fin["quarters"], y=fin["eps"], name="Diluted EPS", yaxis="y2", mode="lines+markers",
+                        line=dict(color=C["warn"], width=2),
+                        hovertemplate="%{x}<br>EPS $%{y:.2f}<extra></extra>")
+    fig.update_layout(margin=dict(l=56, r=48, t=36, b=36), yaxis=dict(tickprefix="$", tickformat=".2s"),
+                      yaxis2=dict(overlaying="y", side="right", tickprefix="$", showgrid=False,
+                                  tickfont=dict(color=C["muted"], size=11)))
     return fig
 
 
-def _chip(text: str, cls: str = ""):
-    return html.Span(text, className=f"chip {cls}".strip())
+def tone_by_topic_figure(analysis: dict) -> go.Figure:
+    cats = sorted(analysis["tone"]["by_category"].items(), key=lambda kv: kv[1]["net"])
+    fig = go.Figure(go.Bar(
+        x=[v["net"] for _, v in cats], y=[k for k, _ in cats], orientation="h",
+        marker_color=[C["pos"] if v["net"] >= 0 else C["neg"] for _, v in cats],
+        customdata=[v["n"] for _, v in cats],
+        hovertemplate="%{y}<br>net tone %{x:+.2f} · %{customdata} sentences<extra></extra>"))
+    fig.update_xaxes(range=[-1, 1], tickformat="+.1f", zeroline=True, zerolinecolor=C["muted"])
+    fig.update_layout(margin=dict(l=110, r=16, t=8, b=32))
+    return fig
 
 
-def key_points_card(d: dict):
-    a = d["analysis"]
+# ---------- cards ----------
+
+def key_points_card(r: dict):
     items = [html.Div([
-        html.Div([_chip(k["category"]), html.Span(f"{k['speaker']} · {k['title']}", className="muted small")],
-                 className="kp-meta"),
+        html.Div([_chip(k["category"]), html.Span(f"FinBERT: {k['tone']} {k['confidence']:.0%}",
+                                                  className="muted small")], className="kp-meta"),
         html.Div(k["text"], className="kp-text"),
-    ], className=f"kp {k['tone']}") for k in a["key_points"]]
+    ], className=f"kp {TONE_CLASS[k['tone']]}") for k in r["analysis"]["key_points"]]
     legend = html.Div([html.Span([html.Span(className=f"dot-s {t}"), lbl], className="legend-item")
                        for t, lbl in (("bad", "Negative"), ("neutral", "Neutral"), ("good", "Positive"))],
                       className="legend")
-    return ui.card(f"Key points · {qlabel(d['quarter'])} call",
+    return ui.card(f"Key points · {_date(r['filing_date'])} release",
                    html.Div(items or html.P("No key sentences found.", className="muted")),
-                   "The most informative management sentences (numbers, guidance, results), picked by NLP when the "
-                   "call was fetched.", actions=legend, className="col-card")
+                   "The most informative sentences (numbers, guidance, results, what's new), with FinBERT's tone.",
+                   actions=legend, className="col-card")
 
 
-def calls_card(c: dict, quarter: str):
+def releases_card(c: dict, selected: str):
     rows = []
-    for k in c["calls"]:
-        surprise = k["eps_surprise_pct"]
-        sub = [html.Span(_date(k["call_date"]), className="muted small")]
-        if surprise is not None:
-            sub.append(_chip(f"EPS {surprise:+.1f}%", "good" if surprise > 0 else "bad"))
-        if k["available"]:
-            sub.append(_chip(f"tone {tone_text(k['tone']['management'])}", tone_class(k["tone"]["management"])))
+    for k in c["releases"]:
+        sub = [html.Span(f"Quarter ended {k['period']}" if k["period"] else "Earnings release",
+                         className="muted small")]
+        if k["status"] == "done" and k["tone"]:
+            sub.append(_chip(f"tone {net_text(k['tone']['net'])}", net_class(k["tone"]["net"])))
+        elif k["status"] == "pending":
+            sub.append(_chip("analysing…", "muted-chip"))
         else:
-            sub.append(_chip("no transcript", "muted-chip"))
+            sub.append(_chip("couldn't read", "bad"))
         rows.append(html.Div([
-            html.Div(f"{qlabel(k['quarter'])} earnings call", className="call-title"),
+            html.Div(f"{_date(k['filing_date'])} release", className="call-title"),
             html.Div(sub, className="call-sub"),
-        ], id={"type": "rs-call", "index": k["quarter"]}, n_clicks=0,
-            className="call-row" + (" selected" if k["quarter"] == quarter else "")
-                      + ("" if k["available"] else " unavailable")))
-    return ui.card("Calls", html.Div(rows, className="call-list"),
-                   "Fiscal quarters. EPS surprise = reported vs analysts' estimate.", className="col-card")
+        ], id={"type": "rs-release", "index": k["accession"]}, n_clicks=0,
+            className="call-row" + (" selected" if k["accession"] == selected else "")
+                      + ("" if k["status"] == "done" else " unavailable")))
+    return ui.card("Earnings releases", html.Div(rows, className="call-list"),
+                   "8-K filings (Item 2.02) with the press release, newest first.", className="col-card")
 
 
-def guidance_card(d: dict):
+def guidance_card(r: dict):
     items = [html.Div([
-        html.Div(className=f"flag-dot {g['tone']}"),
-        html.Div([html.Div(g["speaker"], className="muted small"), html.Div(g["text"], className="kp-text")]),
-    ], className="flag") for g in d["analysis"]["guidance"]]
-    return ui.card("Guidance & outlook", html.Div(items or html.P("No forward-looking numbers found.",
-                                                                   className="muted")),
-                   "Forward-looking statements that include a number.", className="col-card")
+        html.Div(className=f"flag-dot {TONE_CLASS[g['tone']]}"),
+        html.Div(g["text"], className="kp-text"),
+    ], className="flag") for g in r["analysis"]["guidance"]]
+    return ui.card("Guidance & outlook", html.Div(items or html.P(
+        "No forward-looking numbers in this release's text (some companies put guidance in tables or on the call).",
+        className="muted")), "Forward-looking statements that include a number.", className="col-card")
 
 
-def questions_card(d: dict):
-    rows = [[
-        html.Div([html.Div(q["analyst"], className="strong"), html.Div(q["firm"], className="muted small")]),
-        _chip(q["topic"]),
-        html.Div(q["question"], className="wrap"),
-        html.Div(", ".join(q["answered_by"]) or "–", className="small"),
-        html.Span(tone_text(q["answer_tone"]), className=f"tone-num {tone_class(q['answer_tone'])}"),
-    ] for q in d["analysis"]["questions"]]
-    return ui.card("Analyst questions", ui.table(["Analyst", "Topic", "Question", "Answered by", "Answer tone"],
-                                                 rows, numeric_cols={4}) if rows
-                   else html.P("No analyst Q&A in this transcript.", className="muted"),
-                   "Who asked what in the Q&A, and how upbeat management's answer was (Alpha Vantage sentiment).")
+def quotes_card(r: dict):
+    items = [html.Div([
+        html.Div(className=f"flag-dot {TONE_CLASS[q['tone']]}"),
+        html.Div([
+            html.Div(f"“{q['text']}”", className="kp-text"),
+            html.Div(" · ".join(x for x in (q["speaker"], q["title"]) if x) or "Management", className="muted small"),
+        ]),
+    ], className="flag") for q in r["analysis"]["quotes"]]
+    return ui.card("Management commentary", html.Div(items or html.P("No quotes in this release.", className="muted")),
+                   "Executive quotes from the release, coloured by FinBERT's tone.")
 
 
-def speakers_topics(d: dict):
-    a = d["analysis"]
-    sp_rows = [[html.Div([html.Div(s["speaker"], className="strong"), html.Div(s["title"], className="muted small")]),
-                s["role"], f"{s['words']:,}",
-                html.Span(tone_text(s["tone"]), className=f"tone-num {tone_class(s['tone'])}")]
-               for s in sorted(a["speakers"], key=lambda s: -s["words"])]
-    t, topics = a["tone"], a.get("topics", {})
-    hedge = html.Div([
-        _score("HEDGING · PREPARED", "–" if t["hedge_prepared"] is None else f"{t['hedge_prepared']:.1f}"),
-        _score("HEDGING · Q&A", "–" if t["hedge_answers"] is None else f"{t['hedge_answers']:.1f}"),
-        _score("NET TONE WORDS", "–" if t["net_words"] is None else f"{t['net_words']:+.1f}",
-               "neutral" if t["net_words"] is None else ("good" if t["net_words"] > 0 else "bad")),
-    ], className="score-row left")
-    topic_body = html.Div([
+def topics_card(r: dict, c: dict):
+    a = r["analysis"]
+    topics = a.get("topics", {})
+    prev = next((x for x in c["releases"] if x["accession"] == topics.get("compared_with")), None)
+    hedge = a["stats"]["hedging"]
+    return ui.card("Topics & language", html.Div([
         html.Div("Most distinctive terms", className="detail-sub"),
         html.Div([_chip(x) for x in topics.get("top", [])], className="chips"),
-        html.Div(f"New vs {qlabel(topics['compared_with'])}" if topics.get("compared_with")
-                 else "New vs previous call", className="detail-sub"),
+        html.Div(f"New vs the {_date(prev['filing_date'])} release" if prev else "New vs previous release",
+                 className="detail-sub"),
         html.Div([_chip(x, "good") for x in topics.get("new", [])] or
-                 [html.Span("Needs an earlier call in the library to compare with.", className="muted small")],
-                 className="chips"),
+                 [html.Span("Needs an earlier release to compare with.", className="muted small")], className="chips"),
         html.Div("Language", className="detail-sub"),
-        hedge,
-        html.P("Hedging = words like may, could, uncertain per 1,000 management words. Net tone words = positive "
-               "minus negative finance words per 1,000.", className="muted small"),
-    ])
-    return html.Div([
-        ui.card("Speakers", ui.table(["Speaker", "Role", "Words", "Tone"], sp_rows, numeric_cols={2, 3})),
-        ui.card("Topics & language", topic_body),
-    ], className="grid-2")
+        html.Div([
+            _score("HEDGING /1K WORDS", "–" if hedge is None else f"{hedge:.1f}"),
+            _score("SENTENCES SCORED", str(a["stats"]["scored"])),
+            _score("WORDS", f"{a['stats']['words']:,}"),
+        ], className="score-row left"),
+    ]))
 
 
-def transcript_card(d: dict):
-    tl = d["analysis"]["timeline"]
-    rows, section = [], None
-    for s, t in zip(d["segments"], tl):
-        if t["section"] != section:
-            section = t["section"]
-            rows.append(html.Div(section, className="script-section"))
-        rows.append(html.Div([
-            html.Div([html.Div(s["speaker"], className="strong"), html.Div(s["title"], className="muted small")],
-                     className="script-who"),
-            html.Div(s["content"], className="script-text"),
-            html.Span(tone_text(s["sentiment"]), className=f"tone-num {tone_class(s['sentiment'])}"),
-        ], className="script-row"))
-    words = d["analysis"]["stats"]["words"]
-    return ui.card("Transcript", html.Details([
-        html.Summary(f"Show the full call ({words:,} words, {len(tl)} speaker turns)"),
-        html.Div(rows, className="script"),
-    ]), "Source: Alpha Vantage earnings call transcript, with its sentiment score for each speaker turn.")
-
-
-def company_view(symbol: str, quarter: str | None):
-    c = tr.company(symbol)
+def company_view(symbol: str, accession: str | None):
+    c = rs.company(symbol)
     back = html.Button("← Library", id={"type": "rs-back", "index": 0}, n_clicks=0, className="link-btn")
     if not c:
-        return html.Div([back, ui.alert(f"{symbol} isn't in the library yet",
-                                        "Use Fetch calls to download its earnings calls.", "info")])
-    available = [k for k in c["calls"] if k["available"]]
-    if quarter not in {k["quarter"] for k in available}:
-        quarter = available[0]["quarter"] if available else None
-    d = tr.call(symbol, quarter) if quarter else None
-    sel = next((k for k in c["calls"] if k["quarter"] == quarter), None)
-
-    t = d["analysis"]["tone"] if d else {}
-    surprise = sel["eps_surprise_pct"] if sel else None
-    header = html.Div(ui._keep(
+        return html.Div([back, ui.alert(f"{symbol} hasn't been looked up yet", "Search for it above.", "info")])
+    done = [k for k in c["releases"] if k["status"] == "done"]
+    if accession not in {k["accession"] for k in done}:
+        accession = done[0]["accession"] if done else None
+    r = rs.release(symbol, accession) if accession else None
+    fin = c["financials"]
+    tone = r["analysis"]["tone"] if r else {}
+    eps = next((v for v in reversed(fin.get("eps", [])) if v is not None), None)
+    edgar_link = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={c['cik']}&type=8-K"
+    header = html.Div([
         back,
         html.Div([
             html.Div([
                 html.H2(c["name"], className="company-name"),
-                html.Div(" · ".join(x for x in (symbol, c["exchange"], c["sector"], c["industry"]) if x),
+                html.Div(" · ".join(x for x in (symbol, c["exchange"], c["sic"],
+                                                f"FY ends {c['fy_end']}" if c["fy_end"] else "") if x),
                          className="muted small mono"),
+                html.A("EDGAR filings ↗", href=edgar_link, target="_blank", className="small ext-link"),
             ]),
             html.Div([
-                _score("MGMT TONE", tone_text(t.get("management")), tone_class(t.get("management"))),
-                _score("Q&A TONE", tone_text(t.get("answers")), tone_class(t.get("answers"))),
-                _score("ANALYSTS", tone_text(t.get("analysts")), tone_class(t.get("analysts"))),
-                _score("EPS SURP.", "–" if surprise is None else f"{surprise:+.1f}%",
-                       "neutral" if surprise is None else ("good" if surprise > 0 else "bad")),
+                _score("TONE", net_text(tone.get("net")), net_class(tone.get("net"))),
+                _score("POSITIVE", "–" if tone.get("positive") is None else ui.pct(tone["positive"], 0)),
+                _score("NEGATIVE", "–" if tone.get("negative") is None else ui.pct(tone["negative"], 0)),
+                _score("REV YOY", "–" if fin.get("revenue_yoy") is None else ui.pct(fin["revenue_yoy"], 1, signed=True),
+                       "neutral" if fin.get("revenue_yoy") is None else ("good" if fin["revenue_yoy"] > 0 else "bad")),
+                _score("LATEST EPS", "–" if eps is None else f"${eps:.2f}"),
             ], className="score-row"),
         ], className="company-head"),
-        html.Details([html.Summary("About the company"), html.P(c["description"] or "–", className="small")],
-                     className="about") if c["description"] else None,
-    ), className="card company-card")
+    ], className="card company-card")
 
-    if not d:
-        return html.Div([header, ui.alert("No transcripts stored for this company",
-                                          "Alpha Vantage had no call transcripts for the quarters we tried.", "info")])
+    pending = sum(k["status"] == "pending" for k in c["releases"])
+    notes = [ui.alert(f"Analysing {pending} earlier release{'s' if pending > 1 else ''} in the background",
+                      "They appear here as they finish.", "info")] if pending else []
+    if not r:
+        errors = [k["error"] for k in c["releases"] if k["error"]]
+        return html.Div([header, *notes, ui.alert("No release could be analysed yet",
+                                                  "; ".join(errors[:2]) or None, "warn")])
 
-    calls_tab = html.Div([
-        html.Div([key_points_card(d), calls_card(c, quarter), guidance_card(d)], className="grid-3"),
+    releases_tab = html.Div([
+        html.Div([key_points_card(r), releases_card(c, accession), guidance_card(r)], className="grid-3"),
         html.Div([
-            ui.card("Tone across quarters", ui.graph(tone_trend_figure(c["calls"]), 300),
-                    "Alpha Vantage sentiment, weighted by words, for each part of every stored call."),
-            ui.card(f"Tone through the {qlabel(quarter)} call", ui.graph(call_timeline_figure(d["analysis"]), 300),
-                    "Each bar is one speaker turn, in order. The shaded part is the Q&A."),
+            ui.card("Tone across releases", ui.graph(tone_trend_figure(c["releases"]), 300),
+                    "Share of positive and negative key sentences per release (FinBERT), and the net tone."),
+            ui.card("Revenue & EPS", ui.graph(financials_figure(fin), 300) if fin.get("quarters") else
+                    html.P("No US-GAAP numbers in SEC's XBRL data for this company.", className="muted"),
+                    "Calendar quarters from SEC XBRL filings (Q4 = full year minus Q1–Q3)."),
         ], className="grid-2"),
-        questions_card(d),
-        speakers_topics(d),
-        transcript_card(d),
+        html.Div([
+            quotes_card(r),
+            ui.card("Tone by topic", ui.graph(tone_by_topic_figure(r["analysis"]), 300),
+                    "FinBERT net tone of the scored sentences in each topic."),
+        ], className="grid-2"),
+        topics_card(r, c),
+        ui.card("Press release text", html.Details([
+            html.Summary(f"Show the release text ({r['analysis']['stats']['words']:,} words)"),
+            html.Div([html.P(p, className="small") for p in (r["narrative"] or "").split("\n\n")], className="script"),
+        ]), "Narrative part of the press release (financial tables removed).",
+            actions=html.A("Open on sec.gov ↗", href=r["url"], target="_blank", className="small ext-link")
+            if r["url"] else None),
     ])
     return html.Div([
-        header,
-        dcc.Tabs(value="calls", className="tabs", parent_className="tabs-parent", children=[
-            dcc.Tab(label="Earnings Calls", value="calls", className="tab", selected_className="tab--active",
-                    children=html.Div(calls_tab, className="tab-content")),
+        header, *notes,
+        dcc.Tabs(value="releases", className="tabs", parent_className="tabs-parent", children=[
+            dcc.Tab(label="Earnings Releases", value="releases", className="tab", selected_className="tab--active",
+                    children=html.Div(releases_tab, className="tab-content")),
         ]),
     ])
-
-
-def fetch_status(report: dict):
-    sym = report["symbol"]
-    parts = []
-    if report["fetched"]:
-        parts.append(f"fetched {', '.join(qlabel(q) for q in report['fetched'])}")
-    if report["skipped"]:
-        parts.append(f"already had {', '.join(qlabel(q) for q in report['skipped'])}")
-    if report["missing"]:
-        parts.append(f"no transcript for {', '.join(qlabel(q) for q in report['missing'])}")
-    summary = f"{sym}: " + ("; ".join(parts) if parts else "nothing new") + "."
-    if report["error"]:
-        return ui.alert(f"Alpha Vantage stopped the fetch for {sym}", f"{report['error']} {summary}", "warn")
-    return ui.alert(f"{sym} is ready", summary, "info")

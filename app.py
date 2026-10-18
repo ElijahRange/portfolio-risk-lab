@@ -1,12 +1,13 @@
 """Portfolio Risk Lab: Dash entry point. Gunicorn serves `app:server`."""
 import os
 import platform
+import threading
 import time
 
 from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
-from dashboard import config, service, theme, transcripts  # noqa: F401  (theme registers the Plotly template)
+from dashboard import config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
 from dashboard.views import factors, idio, notes, overview, ratio_testing, research, risk
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
@@ -199,59 +200,66 @@ def reset_custom_weights(_, ids):
 
 # ---------- Company Research page ----------
 
+# Load FinBERT while the worker starts, so the first search doesn't wait for it.
+threading.Thread(target=finbert.warm_up, daemon=True).start()
+
+
+@app.callback(Output("rs-status", "children"), Output("rs-fetched", "data"),
+              Input("rs-go", "n_clicks"), Input("rs-search", "n_submit"), State("rs-search", "value"),
+              prevent_initial_call=True)
+def research_search(_clicks, _submit, query):
+    if not query or not query.strip():
+        return ui.alert("Type a ticker or company name", tone="info"), no_update
+    started = time.time()
+    try:
+        symbol = research_store.ensure(query)
+    except research_store.edgar.EdgarError as exc:
+        return ui.alert("Couldn't research that company", str(exc), "warn"), no_update
+    except Exception as exc:
+        return ui.alert("Research failed", f"{type(exc).__name__}: {exc}", "error"), no_update
+    took = time.time() - started
+    note = None if took < 1 else ui.alert(f"{symbol} analysed in {took:.0f} s", "Saved: it opens instantly next time.",
+                                          "info")
+    return note, {"symbol": symbol, "t": time.time()}
+
+
 @app.callback(Output("rs-selected", "data"),
-              Input("rs-open", "n_clicks"), Input("rs-search", "n_submit"),
-              Input({"type": "rs-company", "index": ALL}, "n_clicks"),
-              Input({"type": "rs-call", "index": ALL}, "n_clicks"),
-              Input({"type": "rs-back", "index": ALL}, "n_clicks"),
               Input("rs-fetched", "data"),
-              State("rs-search", "value"), State("rs-selected", "data"), prevent_initial_call=True)
-def research_select(_open, _submit, _companies, _calls, _back, fetched, text, selected):
+              Input({"type": "rs-company", "index": ALL}, "n_clicks"),
+              Input({"type": "rs-release", "index": ALL}, "n_clicks"),
+              Input({"type": "rs-back", "index": ALL}, "n_clicks"),
+              Input("rs-poll", "n_intervals"),
+              State("rs-selected", "data"), prevent_initial_call=True)
+def research_select(fetched, _companies, _releases, _back, _poll, selected):
     trig = ctx.triggered_id
     if not ctx.triggered or not ctx.triggered[0]["value"]:
         return no_update  # a list re-render, not a click
     selected = selected or {}
-    if trig in ("rs-open", "rs-search"):
-        symbol = research.resolve(text)
-        return {"symbol": symbol, "quarter": None, "missing": None if symbol else text}
     if trig == "rs-fetched":
-        return {"symbol": fetched["symbol"], "quarter": None} if fetched.get("ok") else no_update
+        return {"symbol": fetched["symbol"], "release": None}
+    if trig == "rs-poll":  # background analysis finished another release: re-render
+        symbol = selected.get("symbol")
+        pending = research_store.pending_count(symbol) if symbol else 0
+        return {**selected, "pending": pending} if pending != selected.get("pending") else no_update
     if isinstance(trig, dict) and trig["type"] == "rs-company":
-        return {"symbol": trig["index"], "quarter": None}
-    if isinstance(trig, dict) and trig["type"] == "rs-call":
-        return {"symbol": selected.get("symbol"), "quarter": trig["index"]}
+        return {"symbol": trig["index"], "release": None}
+    if isinstance(trig, dict) and trig["type"] == "rs-release":
+        return {**selected, "release": trig["index"]}
     if isinstance(trig, dict) and trig["type"] == "rs-back":
-        return {"symbol": None, "quarter": None}
+        return {"symbol": None, "release": None}
     return no_update
 
 
-@app.callback(Output("rs-body", "children"), Input("rs-selected", "data"))
+@app.callback(Output("rs-body", "children"), Output("rs-poll", "disabled"), Input("rs-selected", "data"))
 def research_body(selected):
+    symbol = (selected or {}).get("symbol")
     try:
-        if selected and selected.get("missing"):
-            return html.Div([ui.alert(f"No company matching '{selected['missing']}' in the library",
-                                      "Use Fetch calls on the right to download it from Alpha Vantage.", "info"),
-                             research.library_view()])
-        return research.body(selected)
+        if symbol and not research_store.company(symbol):
+            symbol = research_store.ensure(symbol)  # deep link (/research?symbol=X) to a new company
+            selected = {"symbol": symbol, "release": None}
+        return research.body(selected), not (symbol and research_store.pending_count(symbol))
     except Exception as exc:
-        return ui.alert("Could not open the research page", f"{type(exc).__name__}: {exc}", "error")
-
-
-@app.callback(Output("rs-add-status", "children"), Output("rs-fetched", "data"), Output("rs-names", "children"),
-              Input("rs-add-btn", "n_clicks"), Input("rs-add", "n_submit"), State("rs-add", "value"),
-              prevent_initial_call=True)
-def research_fetch(_clicks, _submit, ticker):
-    if not ticker:
-        return ui.alert("Type a ticker first", tone="info"), no_update, no_update
-    try:
-        report = transcripts.ingest(ticker)
-    except transcripts.AlphaVantageError as exc:
-        return ui.alert("Could not fetch from Alpha Vantage", str(exc), "warn"), no_update, no_update
-    except Exception as exc:
-        return ui.alert("Fetch failed", f"{type(exc).__name__}: {exc}", "error"), no_update, no_update
-    stored = transcripts.company(report["symbol"]) is not None
-    names = [html.Option(value=c["symbol"], label=c["name"]) for c in transcripts.library()]
-    return (research.fetch_status(report), {"symbol": report["symbol"], "ok": stored, "t": time.time()}, names)
+        return ui.alert("Could not open the research page", f"{type(exc).__name__}: {exc}", "error"), True
 
 
 if __name__ == "__main__":
