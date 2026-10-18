@@ -41,14 +41,14 @@ a { color: inherit; text-decoration: none; }
   font-family: "Silkscreen", var(--mono); font-weight: 700; font-size: 30px; line-height: 1; letter-spacing: .08em;
   color: var(--text-strong); text-shadow: 0 0 14px rgba(58,142,230,.35);
 }
-.brand-expansion { max-width: 22ch; margin: 10px auto 0; font-size: 12px; line-height: 1.45; color: var(--text); }
-.brand-initial { font-weight: 700; }
+.brand-expansion { margin: 8px auto 0; font-size: 10px; line-height: 1.5; letter-spacing: .01em; color: var(--muted); }
+.brand-initial { font-weight: 600; opacity: .9; }
 .brand-initial.i0 { color: var(--neg); }
 .brand-initial.i1 { color: var(--warn); }
 .brand-initial.i2 { color: var(--pos); }
 .brand-initial.i3 { color: var(--primary); }
 .brand-initial.i4 { color: var(--violet); }
-.brand-sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
+.brand-sub { margin-top: 8px; color: var(--muted); font-size: 10px; opacity: .8; }
 .sidebar nav { flex: 1; padding: 8px 0; }
 .nav-group { padding: 18px 20px 8px; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .nav-link { display: block; padding: 10px 20px; color: var(--text); border-left: 2px solid transparent; }
