@@ -34,6 +34,16 @@ def layout():
                     "CVaR is the average loss on those worst days."),
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "
                     "covariance of returns."),
+            html.Li("Value at risk: historical (empirical 5% / 1% quantiles of the last 252 days), normal, "
+                    "Cornish-Fisher (normal quantile adjusted for skew and excess kurtosis) and EWMA "
+                    "(RiskMetrics, λ = 0.94). Expected shortfall 97.5% = average loss beyond the 97.5% quantile."),
+            html.Li("VaR backtest: each day's EWMA 95% VaR is forecast from earlier days only; breaches over the "
+                    "last 252 days are scored with the Kupiec proportion-of-failures test."),
+            html.Li("Stress tests: historical sell-off windows replayed buy-and-hold with today's weights; "
+                    "hypothetical S&P 500 shocks are scaled by the portfolio's downside beta (full history)."),
+            html.Li("Risk budget: Euler decomposition of portfolio volatility (weight × marginal contribution). "
+                    "Diversification ratio = weighted sum of stand-alone vols ÷ portfolio vol."),
+            html.Li("Upside / downside beta: OLS slope on S&P 500 up days and down days separately."),
             html.Li("Risk geometry: principal component analysis (PCA) of the positions' return correlations; "
                     "each axis is named after the factor ETFs it tracks most closely and shows its share of "
                     "variance. Risk groups come from Ward hierarchical clustering on the correlation distance "

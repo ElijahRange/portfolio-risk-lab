@@ -272,3 +272,5 @@ a { color: inherit; text-decoration: none; }
 .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 0; }
 .grid-3.geo-panels { grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr) minmax(0, 1.2fr); }
 @media (max-width: 1100px) { .grid-3.geo-panels { grid-template-columns: minmax(0, 1fr); } }
+.var-chips { margin: 12px 0 8px; }
+.stat-strip.regimes { grid-template-columns: repeat(3, minmax(0, 1fr)); }

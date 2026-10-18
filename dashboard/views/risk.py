@@ -1,10 +1,12 @@
-"""Risk Analysis tab: VaR, concentration, 3D risk geometry, contributors and correlations."""
+"""Risk Analysis tab: tail risk, VaR backtest, stress tests, risk budget, 3D risk geometry, diversification."""
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
+from scipy import stats
 
 from .. import components as ui
+from .. import config, risk_metrics
 from ..analytics import Analysis
 from ..theme import C, DIVERGING, MONO
 
@@ -255,64 +257,215 @@ def geometry_controls():
     ], className="geo-controls")
 
 
-def contributors_figure(a: Analysis) -> go.Figure:
-    top = a.positions.reindex(a.positions["risk_contrib"].abs().sort_values(ascending=False).index).head(12)
-    top = top.iloc[::-1]
-    fig = go.Figure(go.Bar(
-        x=top["risk_contrib"], y=top["ticker"], orientation="h",
-        marker_color=[C["pos"] if s == "Long" else C["neg"] for s in top["side"]],
-        customdata=top["weight"],
-        hovertemplate="%{y}<br>%{x:.1%} of variance<br>weight %{customdata:.2%}<extra></extra>",
-    ))
-    fig.update_xaxes(tickformat=".0%")
-    fig.update_layout(margin=dict(l=64, r=16, t=8, b=32))
+# Tail risk, backtest, stress, budget and diversification panels.
+GRID_BAR = "#3a4454"
+
+
+def _bar_colors(cond, on, off=GRID_BAR):
+    return [on if c else off for c in cond]
+
+
+def distribution_figure(a: Analysis, rep: risk_metrics.RiskReport) -> go.Figure:
+    r = a.port_returns * a.nav
+    counts, edges = np.histogram(r, bins=45)
+    mids, width = (edges[:-1] + edges[1:]) / 2, edges[1] - edges[0]
+    v = rep.var_methods.loc["Historical"] * a.nav
+    fig = go.Figure()
+    fig.add_bar(x=mids, y=counts, width=width * 0.92, name="Days",
+                marker_color=_bar_colors(mids < -v["var95"], C["neg"], C["primary"]), marker_opacity=0.8,
+                customdata=np.column_stack([edges[:-1], edges[1:]]),
+                hovertemplate="%{customdata[0]:$,.0f} to %{customdata[1]:$,.0f}<br>%{y} days<extra></extra>")
+    grid = np.linspace(edges[0], edges[-1], 200)
+    fig.add_scatter(x=grid, y=stats.norm.pdf(grid, r.mean(), r.std()) * len(r) * width, name="Normal fit",
+                    mode="lines", line=dict(color=C["bench"], width=1.5, dash="dash"), hoverinfo="skip")
+    for x, label, color, dash, y in ((-v["var95"], "VaR 95%", C["warn"], "solid", 1.0),
+                                     (-v["var99"], "VaR 99%", C["neg"], "solid", 0.82),
+                                     (-v["es975"], "ES 97.5%", C["neg"], "dot", 0.64)):
+        fig.add_vline(x=x, line=dict(color=color, width=1.5, dash=dash))
+        fig.add_annotation(x=x, y=y, yref="paper", bgcolor="rgba(18,21,28,0.85)", text=f"{label}<br>{ui.usd(x)}", showarrow=False,
+                           xanchor="right", yanchor="top", align="right",
+                           font=dict(family=MONO, size=10, color=color))
+    fig.update_xaxes(tickformat="$,.0f", title_text="Daily P&L")
+    fig.update_yaxes(title_text="Days")
+    fig.update_layout(bargap=0, margin=dict(l=52, r=12, t=12, b=44), legend=dict(x=0, y=1.12))
     return fig
 
 
-def factor_risk_figure(a: Analysis) -> go.Figure:
-    ft = a.factor_table
-    total = a.risk_split["factor"] + a.risk_split["idiosyncratic"]
-    names = list(ft.index) + ["Stock-specific"]
-    shares = list(ft["risk_share"]) + [a.risk_split["idiosyncratic"] / total if total else 0]
-    order = np.argsort(np.abs(shares))
-    names, shares = [names[i] for i in order], [shares[i] for i in order]
-    fig = go.Figure(go.Bar(
-        x=shares, y=names, orientation="h",
-        marker_color=[C["bench"] if n == "Stock-specific" else (C["primary"] if s >= 0 else C["warn"])
-                      for n, s in zip(names, shares)],
-        hovertemplate="%{y}<br>%{x:.1%} of model variance<extra></extra>",
-    ))
-    fig.update_xaxes(tickformat=".0%")
-    fig.update_layout(margin=dict(l=96, r=16, t=8, b=32))
+def var_panel(a: Analysis, rep: risk_metrics.RiskReport):
+    vm = rep.var_methods * a.nav
+    rows = [[name, ui.usd(r["var95"]), ui.usd(r["var99"]), ui.usd(r["es975"])] for name, r in vm.iterrows()]
+    m = rep.moments
+    chips = [
+        (f"Skew {m['skew']:+.2f}", "bad" if m["skew"] < -0.25 else "neutral"),
+        (f"Excess kurtosis {m['kurt']:+.2f}", "bad" if m["kurt"] > 1 else "neutral"),
+        (f"Worst day {ui.usd(m['worst'] * a.nav)} · {m['worst_day']:%b %d}", "bad"),
+        (f"Best day {ui.usd(m['best'] * a.nav, signed=True)} · {m['best_day']:%b %d}", "good"),
+    ]
+    return html.Div([
+        ui.table(["Method", "VaR 95%", "VaR 99%", "ES 97.5%"], rows, numeric_cols={1, 2, 3}),
+        html.Div([html.Span(t, className=f"chip {c}") for t, c in chips], className="chips var-chips"),
+        html.P("Historical uses the actual last 252 days. Normal assumes a bell curve. Cornish-Fisher bends "
+               "it for skew and fat tails. EWMA weights recent days most, so it reacts fastest.",
+               className="muted small"),
+    ])
+
+
+def backtest_figure(a: Analysis, rep: risk_metrics.RiskReport) -> go.Figure:
+    bt = rep.backtest
+    pnl = bt["ret"] * a.nav
+    fig = go.Figure()
+    fig.add_bar(x=bt.index, y=pnl, name="Daily P&L", marker_color=_bar_colors(bt["breach"], C["neg"], "#4a5568"),
+                marker_line_width=0, hovertemplate="%{x|%b %d, %Y}<br>P&L %{y:$,.0f}<extra></extra>")
+    fig.add_scatter(x=bt.index, y=-bt["var95"] * a.nav, name="EWMA 95% VaR", mode="lines",
+                    line=dict(color=C["warn"], width=1.5), hovertemplate="VaR %{y:$,.0f}<extra></extra>")
+    br = bt[bt["breach"]]
+    fig.add_scatter(x=br.index, y=br["ret"] * a.nav, name=f"Breach ({len(br)})", mode="markers",
+                    marker=dict(color=C["neg"], size=5), hoverinfo="skip")
+    start = bt.index[-min(len(bt), config.TRADING_DAYS)]
+    fig.add_vrect(x0=start, x1=bt.index[-1], fillcolor=C["primary"], opacity=0.06, line_width=0,
+                  annotation=dict(text="scored: last 252 days", font=dict(size=10, color=C["muted"])),
+                  annotation_position="top left")
+    fig.update_yaxes(tickformat="$,.0f")
+    fig.update_layout(bargap=0, margin=dict(l=64, r=12, t=12, b=32), legend=dict(x=0, y=1.12),
+                      hovermode="x unified")
     return fig
 
 
-def correlation_figure(a: Analysis) -> go.Figure:
-    corr = a.corr
-    fig = go.Figure(go.Heatmap(
-        z=corr.to_numpy(), x=corr.columns, y=corr.index, zmin=-1, zmax=1, colorscale=DIVERGING,
-        colorbar=dict(thickness=8, outlinewidth=0, tickfont=dict(color=C["muted"], size=10)),
-        hovertemplate="%{y} × %{x}<br>ρ = %{z:.2f}<extra></extra>",
-    ))
-    fig.update_yaxes(autorange="reversed")
-    fig.update_layout(margin=dict(l=64, r=8, t=8, b=56))
+def stress_figure(a: Analysis, rep: risk_metrics.RiskReport) -> go.Figure:
+    s = rep.stress.iloc[::-1]
+    labels = [f"<b>{n}</b><br><span style='font-size:10px;color:{C['muted']}'>{p}</span>"
+              for n, p in zip(s["scenario"], s["period"])]
+    fig = go.Figure()
+    fig.add_bar(y=labels, x=s["bench"], orientation="h", name="S&P 500", marker_color="#4a5568",
+                hovertemplate="S&P 500 %{x:.1%}<extra></extra>")
+    fig.add_bar(y=labels, x=s["port"], orientation="h", name="Portfolio", marker_color=C["primary"],
+                text=[ui.usd(v * a.nav, signed=True, compact=True) for v in s["port"]], textposition="outside",
+                textfont=dict(family=MONO, size=10, color=C["text"]), cliponaxis=False,
+                customdata=s["port"] * a.nav,
+                hovertemplate="Portfolio %{x:.1%} (%{customdata:$,.0f})<extra></extra>")
+    fig.update_xaxes(tickformat=".0%", range=[min(s["port"].min(), s["bench"].min()) * 1.32, 0.005])
+    fig.update_layout(barmode="group", bargap=0.28, bargroupgap=0.08, legend=dict(x=0, y=1.08, traceorder="reversed"),
+                      margin=dict(l=190, r=16, t=8, b=28))
+    return fig
+
+
+def budget_figure(rep: risk_metrics.RiskReport) -> go.Figure:
+    b = rep.budget.sort_values("risk_share")
+    names = [t.replace(".NS", "") for t in b.index]
+    over = b["risk_share"] > b["weight"]
+    fig = go.Figure()
+    xs, ys = [], []
+    for n, w, r in zip(names, b["weight"], b["risk_share"]):
+        xs += [w, r, None]
+        ys += [n, n, None]
+    fig.add_scatter(x=xs, y=ys, mode="lines", line=dict(color="#3a4454", width=6), showlegend=False,
+                    hoverinfo="skip")
+    fig.add_scatter(x=b["weight"], y=names, mode="markers", name="Share of capital",
+                    marker=dict(size=11, color=C["surface"], line=dict(color=C["bench"], width=2)),
+                    hovertemplate="%{y}: %{x:.1%} of capital<extra></extra>")
+    fig.add_scatter(x=b["risk_share"], y=names, mode="markers", name="Share of risk",
+                    marker=dict(size=12, color=_bar_colors(over, C["neg"], C["pos"])),
+                    customdata=np.column_stack([b["vol"], b["mctr"], b["beta"]]),
+                    hovertemplate="%{y}: %{x:.1%} of risk<br>stand-alone vol %{customdata[0]:.1%}<br>"
+                                  "marginal risk %{customdata[1]:.3f} · beta %{customdata[2]:.2f}<extra></extra>")
+    fig.update_xaxes(tickformat=".0%", rangemode="tozero")
+    fig.update_yaxes(tickfont=dict(family=MONO, size=11))
+    fig.update_layout(margin=dict(l=80, r=16, t=8, b=28), legend=dict(x=0, y=1.1))
+    return fig
+
+
+def diversification_figure(rep: risk_metrics.RiskReport) -> go.Figure:
+    d = rep.diversification
+    fig = go.Figure()
+    fig.add_scatter(x=d.index, y=d["div_ratio"], name="Diversification ratio", mode="lines",
+                    line=dict(color=C["primary"], width=1.8), hovertemplate="ratio %{y:.2f}×<extra></extra>")
+    fig.add_scatter(x=d.index, y=d["avg_corr"], name="Avg pairwise correlation", mode="lines", yaxis="y2",
+                    line=dict(color=C["warn"], width=1.5), hovertemplate="avg ρ %{y:.2f}<extra></extra>")
+    fig.update_layout(
+        yaxis=dict(title=dict(text="Diversification ratio"), tickformat=".1f"),
+        yaxis2=dict(title=dict(text="Avg ρ", font=dict(color=C["muted"], size=11)), overlaying="y", side="right",
+                    showgrid=False, tickfont=dict(color=C["muted"], size=11), tickformat=".2f", zeroline=False),
+        margin=dict(l=52, r=48, t=12, b=32), legend=dict(x=0, y=1.12), hovermode="x unified",
+    )
+    return fig
+
+
+def regimes_strip(rep: risk_metrics.RiskReport):
+    return html.Div([html.Div([html.Div(k, className="stat-label"), html.Div(f"ρ {v:.2f}", className="stat-value")],
+                              className="stat") for k, v in rep.corr_regimes.items()],
+                    className="stat-strip regimes")
+
+
+def updown_figure(rep: risk_metrics.RiskReport) -> go.Figure:
+    u = rep.updown.copy()
+    u["gap"] = u["down_beta"] - u["up_beta"]
+    names = [t for t in u.drop(index="Portfolio").sort_values("gap").index] + ["Portfolio"]
+    u = u.loc[names]
+    labels = [f"<b>{n}</b>" if n == "Portfolio" else n.replace(".NS", "") for n in names]
+    fig = go.Figure()
+    xs, ys = [], []
+    for lab, d, up in zip(labels, u["down_beta"], u["up_beta"]):
+        xs += [up, d, None]
+        ys += [lab, lab, None]
+    fig.add_scatter(x=xs, y=ys, mode="lines", line=dict(color="#3a4454", width=6), showlegend=False,
+                    hoverinfo="skip")
+    fig.add_scatter(x=u["up_beta"], y=labels, mode="markers", name="Beta on S&P up days",
+                    marker=dict(size=11, color=C["pos"]), hovertemplate="%{y}: up-day beta %{x:.2f}<extra></extra>")
+    fig.add_scatter(x=u["down_beta"], y=labels, mode="markers", name="Beta on S&P down days",
+                    marker=dict(size=11, color=C["neg"]), hovertemplate="%{y}: down-day beta %{x:.2f}<extra></extra>")
+    fig.add_vline(x=1, line=dict(color=C["muted"], width=1, dash="dot"))
+    fig.update_yaxes(tickfont=dict(family=MONO, size=11))
+    fig.update_xaxes(title_text="Beta to the S&P 500")
+    fig.update_layout(margin=dict(l=84, r=16, t=8, b=40), legend=dict(x=0, y=1.1))
     return fig
 
 
 def layout(a: Analysis):
     k = a.kpis
+    rep = risk_metrics.report(a)
+    hist = rep.var_methods.loc["Historical"]
+    kp = rep.kupiec
+    kupiec_ok = kp["p_value"] >= 0.05
+    worst = rep.stress[rep.stress["kind"] != "Hypothetical"].sort_values("port").iloc[0]
+    bench_vol = float(rep.bench.tail(config.TRADING_DAYS).std() * np.sqrt(config.TRADING_DAYS))
     has_geo = not a.pca_points.empty
     geometry = (html.Div([geometry_stats(a), ui.graph(geometry_figure(a), 600, graph_id="geo-graph")])
                 if has_geo else html.P("Needs at least three positions with price history.", className="muted"))
     return html.Div([
         ui.kpi_row(
-            ui.kpi("Annualized volatility", ui.pct(k["ann_vol"], 1)),
-            ui.kpi("1-day VaR (95%)", ui.usd(k["var95_usd"]), "neg",
-                   sub=f"{ui.pct(k['var95_pct'])} of NAV · CVaR {ui.pct(k['cvar95_pct'])}"),
-            ui.kpi("Max drawdown", ui.pct(k["max_drawdown"], 1), "neg"),
-            ui.kpi("Effective # of positions", ui.num(k["effective_n"], 1),
-                   sub=f"Top 10 = {ui.pct(k['top10_pct'], 0)} of gross"),
+            ui.kpi("Annualized volatility", ui.pct(k["ann_vol"], 1), sub=f"S&P 500 {ui.pct(bench_vol, 1)} · last 252 days"),
+            ui.kpi("1-day VaR (95%)", ui.usd(hist["var95"] * a.nav), "neg",
+                   sub=f"{ui.pct(hist['var95'])} of NAV · 99%: {ui.usd(hist['var99'] * a.nav)}"),
+            ui.kpi("Expected shortfall (97.5%)", ui.usd(hist["es975"] * a.nav), "neg",
+                   sub="average loss on the worst 2.5% of days"),
+            ui.kpi("Diversification ratio", f"{rep.div_ratio:.2f}×",
+                   sub=f"diversification cuts volatility by {1 - 1 / rep.div_ratio:.0%}"),
+            ui.kpi("VaR backtest", f"{kp['breaches']} / {kp['n']}", "" if kupiec_ok else "neg",
+                   sub=f"breaches vs {kp['expected']:.1f} expected · {'passes' if kupiec_ok else 'fails'} "
+                       f"(Kupiec p {kp['p_value']:.2f})"),
+            ui.kpi("Worst replayed sell-off", ui.usd(worst["port"] * a.nav, signed=True, compact=True), "neg",
+                   sub=f"{worst['scenario']} · {ui.pct(worst['port'], 1)}"),
         ),
+        html.Div([
+            ui.card("Daily P&L distribution", ui.graph(distribution_figure(a, rep), 340),
+                    "Every trading day of the last year at today's position sizes. Red bars are the days worse "
+                    "than the 95% VaR; the dashed curve is what a normal distribution would predict."),
+            ui.card("Value at risk by method", var_panel(a, rep),
+                    "One-day loss not exceeded on 95% / 99% of days, and the average loss beyond the 97.5% "
+                    "cut-off (expected shortfall, the Basel III measure)."),
+        ], className="grid-2 wide-left"),
+        ui.card("VaR backtest", ui.graph(backtest_figure(a, rep), 320),
+                f"Today's portfolio replayed since {rep.backtest.index[0]:%b %Y}. The amber line is each day's "
+                "EWMA 95% VaR, forecast the night before; red bars broke through it. A good model is breached "
+                "on about 5% of days."),
+        html.Div([
+            ui.card("Stress tests", ui.graph(stress_figure(a, rep), 420),
+                    "Real sell-offs replayed with today's weights, next to what the S&P 500 did. The last two "
+                    "rows scale an S&P drop by the portfolio's downside beta."),
+            ui.card("Risk budget", ui.graph(budget_figure(rep), 420),
+                    "Share of capital (hollow) vs share of portfolio volatility (filled). Red names use more "
+                    "risk than their capital; green names are cheaper in risk than in dollars."),
+        ], className="grid-2"),
         ui.card("Risk geometry (PCA → 3D)", geometry,
                 "Each position sits where its returns load on the portfolio's three main risk directions. "
                 "Names close together move together; lines join the most correlated pairs (red dashed = they "
@@ -330,11 +483,13 @@ def layout(a: Analysis):
                     "portfolio variance."),
         ], className="grid-3 geo-panels") if has_geo else None,
         html.Div([
-            ui.card("Top risk contributors", ui.graph(contributors_figure(a), 380),
-                    "Share of total portfolio variance from each position (negative = hedging)."),
-            ui.card("Factor vs stock-specific risk", ui.graph(factor_risk_figure(a), 380),
-                    "Share of modelled variance from each factor and from stock-specific moves."),
+            ui.card("Diversification over time", html.Div([regimes_strip(rep),
+                                                           ui.graph(diversification_figure(rep), 300)]),
+                    f"Rolling {risk_metrics.ROLL}-day diversification ratio (sum of stand-alone vols ÷ portfolio "
+                    "vol; higher = more diversified) and average correlation between the names. The strip shows "
+                    "whether correlations rise when the market falls."),
+            ui.card("Upside vs downside beta", ui.graph(updown_figure(rep), 384),
+                    "Sensitivity to the S&P 500 on its up days vs its down days, over the full history. Names "
+                    "whose red dot sits right of the green one fall harder than they rise with the market."),
         ], className="grid-2"),
-        ui.card("Correlation of largest positions", ui.graph(correlation_figure(a), 460),
-                "Daily return correlation over the lookback window for the 15 largest positions."),
     ])
