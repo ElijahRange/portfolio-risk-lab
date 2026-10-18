@@ -1,7 +1,6 @@
 # Installed into .venv on top of the LinuxONE Jupyter image, which already provides numpy, pandas,
 # scipy, scikit-learn, requests and the deep-learning stack (all built for s390x).
 dash==4.4.1
-dash-auth==2.3.0
 plotly==7.1.0
 gunicorn==26.2.0
 openpyxl==3.1.5

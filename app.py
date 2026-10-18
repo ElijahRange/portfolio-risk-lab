@@ -13,17 +13,6 @@ from dashboard.views import factors, idio, notes, overview, ratio_testing, resea
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
 
-# Fail closed: the site is on a public IP, so a team login is required unless explicitly disabled.
-if os.environ.get("DASH_AUTH_DISABLED") == "1":
-    pass
-elif os.environ.get("DASH_USERS"):
-    import dash_auth
-
-    users = dict(pair.split(":", 1) for pair in os.environ["DASH_USERS"].split(",") if ":" in pair)
-    dash_auth.BasicAuth(app, users)
-else:
-    raise RuntimeError("Set DASH_USERS=user:password[,user2:password2] or DASH_AUTH_DISABLED=1 (local only).")
-
 TABS = {
     "overview": ("Portfolio View", overview),
     "factors": ("Factor Model", factors),

@@ -16,8 +16,7 @@ notes in more detail; keep both in sync when you change something important.
 - **The product:** "Portfolio Risk Lab", a dark-themed Dash dashboard that analyses the team's real
   9-stock, $1,000,000 portfolio and researches any US company.
 
-**Live site:** http://148.100.98.18:8050. Team login; ask Elijah for the password. Never put it in
-code, commits, issues or chat.
+**Live site:** http://148.100.98.18:8050 (public, no login).
 
 ## 2. What exists now
 
@@ -50,7 +49,6 @@ git clone https://github.com/ElijahRange/portfolio-risk-lab.git
 cd portfolio-risk-lab
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-local.txt
-export DASH_AUTH_DISABLED=1                       # no login locally (never on the server)
 export SEC_USER_AGENT="Portfolio Risk Lab your.email@example.com"   # needed by Company Research
 python app.py                                     # http://127.0.0.1:8050
 ```
@@ -95,10 +93,9 @@ commands (logs, restarts, preloading research companies). You don't need SSH for
 
 - **Private data stays private.** Holdings and the Bloomberg export (licensed data) live in
   `data/private/` (git-ignored). Never commit them, print them in logs, or paste them anywhere public.
-- **No secrets in the repo.** `.env` (site login, `SEC_USER_AGENT`) is git-ignored. Use `.env.example`
+- **No secrets in the repo.** `.env` (`SEC_USER_AGENT`) is git-ignored. Use `.env.example`
   to document new variables with fake values.
-- **The site is on a public IP**: `app.py` refuses to start without a login unless
-  `DASH_AUTH_DISABLED=1`. Only use that locally.
+- **The site is public with no login** (a deliberate choice for this hackathon). Don't add secrets to it.
 - **Keep `dashboard/s390x_fix.py` imported** (theme.py does it). Without it every Plotly chart is
   garbage on IBM Z because of byte order.
 - **The AI/ML has to run on LinuxONE** for judging. Prefer local models (Hugging Face models via the

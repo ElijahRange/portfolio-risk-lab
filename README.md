@@ -3,7 +3,7 @@
 A chart-heavy portfolio risk dashboard for the IBM Z Datathon, running on an
 IBM LinuxONE (s390x) virtual server.
 
-- **Live site:** http://148.100.98.18:8050 (team login; ask Elijah for the password)
+- **Live site:** http://148.100.98.18:8050 (public, no login)
 - **Stack:** Python 3.12 · Dash 4 · Plotly 7 · pandas · NumPy · Gunicorn · Podman
 
 **New here (or using an AI coding agent)? Start with [AGENTS.md](AGENTS.md).**
@@ -19,7 +19,7 @@ cd portfolio-risk-lab
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-local.txt
 export SEC_USER_AGENT="Portfolio Risk Lab your.email@example.com"   # for Company Research
-DASH_AUTH_DISABLED=1 python app.py      # http://127.0.0.1:8050 on your laptop
+python app.py                           # http://127.0.0.1:8050 on your laptop
 ```
 
 Then commit and push (`git pull --rebase` first if someone else pushed).

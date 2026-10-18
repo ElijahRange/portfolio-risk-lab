@@ -14,7 +14,7 @@ NAME=dashboard
 # keep-id runs as linux1 inside the container, so the app can write to the mounted repo.
 COMMON=(--userns keep-id --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/app:z -w /app --entrypoint "")
 
-[[ -f .env ]] || { echo "Missing .env - copy .env.example to .env and set DASH_USERS." >&2; exit 1; }
+[[ -f .env ]] || { echo "Missing .env - copy .env.example to .env and set SEC_USER_AGENT." >&2; exit 1; }
 
 if [[ "${1:-}" == "--install" || ! -x .venv/bin/gunicorn ]]; then
   podman run --rm "${COMMON[@]}" "$BASE" bash -c '

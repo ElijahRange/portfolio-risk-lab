@@ -14,9 +14,8 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   from public, textbook methods.
 - **Real holdings stay private.** They live in `data/private/` (git-ignored). Never
   commit them, print them in logs or paste them into issues.
-- `.env` holds the site login (`DASH_USERS`). It is git-ignored; never commit or echo it.
-- The site is on a public IP, so `app.py` refuses to start without `DASH_USERS` unless
-  `DASH_AUTH_DISABLED=1`. Only use that on 127.0.0.1.
+- `.env` holds `SEC_USER_AGENT`. It is git-ignored; never commit or echo it.
+- The site is public with no login (the team chose this: low-stakes hackathon project).
 
 ## Architecture
 
@@ -91,19 +90,17 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
 
 - Verify changes before pushing:
   ```bash
-  podman exec -e DASH_AUTH_DISABLED=1 dashboard .venv/bin/python -c \
+  podman exec dashboard .venv/bin/python -c \
     "from dashboard import service; from dashboard.views import overview, factors, risk; \
      a = service.current_analysis(); [v.layout(a) for v in (overview, factors, risk)]"
   ```
-- For a visual check without the password, run a second gunicorn on `127.0.0.1:8051` with
-  `DASH_AUTH_DISABLED=1` and SSH-tunnel to it.
 - Commit small, descriptive changes to `main`. Teammates push from laptops; the server
   pulls.
 
 ## Team data file: `data/private/IMBZportfolio_hist_data.xlsx`
 
-This is Bloomberg Terminal export data. It is git-ignored; never commit it or expose it
-outside the login-protected site. The file has **prices only, no position sizes**.
+This is Bloomberg Terminal export data. It is git-ignored; never commit it or publish
+the raw file. The file has **prices only, no position sizes**.
 
 - **Sheet3** (main price sheet):
   - Daily `PX_LAST`, `PX_OPEN`, `PX_VOLUME`, `BETA_RAW_OVERRIDABLE` for VZ, MMM, SPX Index,
