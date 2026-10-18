@@ -1,5 +1,7 @@
 # PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring)
 
+Live Video Demo for IBM Competition: https://youtu.be/bEHjWlfXpaI?si=PLL7SVvicfFNY84V
+
 A chart-heavy portfolio risk dashboard for the IBM Z Datathon, running on an
 IBM LinuxONE (s390x) virtual server.
 
