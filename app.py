@@ -1,4 +1,6 @@
 """PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring): Dash entry point. Gunicorn serves `app:server`."""
+from dashboard import safe_io  # noqa: F401  (first: printing must never crash the app if its output pipe breaks)
+
 import os
 import platform
 import threading
@@ -272,6 +274,15 @@ def research_body(selected):
         return research.body(selected), not (symbol and research_store.pending_count(symbol))
     except Exception as exc:
         return ui.alert("Could not open the research page", f"{type(exc).__name__}: {exc}", "error"), True
+
+
+@server.route("/healthz")
+def healthz():
+    """For scripts/watchdog.sh: the portfolio loads and the on-device assistant answers (no Claude call, no cost)."""
+    out = assistant.answer("What is our 1-day VaR?")  # never raises: problems come back as intent "error"
+    if out.get("intent") == "var" and out.get("value"):
+        return "ok", 200, {"Content-Type": "text/plain"}
+    return f"unhealthy: {out.get('text')}", 503, {"Content-Type": "text/plain"}
 
 
 # ---------- Portfolio assistant (chat bubble on every page) ----------

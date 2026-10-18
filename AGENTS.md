@@ -168,6 +168,12 @@ Design language:
 
 ## 7. IBM Z / s390x gotchas (already solved; don't undo)
 
+- **Restarting the container from a script or timer:** use `scripts/run_detached.sh scripts/deploy.sh`, never
+  `scripts/deploy.sh` directly from a systemd service. Otherwise systemd kills the container's `conmon` when the job
+  ends and every print fails with "Broken pipe" (this took the chat down on 2026-10-18). `dashboard/safe_io.py` and
+  `scripts/watchdog.sh` (runs every minute, restarts the site if it's unhealthy; checks `/healthz`) are the safety net;
+  keep `safe_io` the first import in `app.py`.
+
 - Plotly byte order: `s390x_fix.py` (see above).
 - `podman build` fails on the event image (podman 5.8 bug), so the server layers `.venv` on the image
   via `scripts/deploy.sh` instead of a Containerfile.

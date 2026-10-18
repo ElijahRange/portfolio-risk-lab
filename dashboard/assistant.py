@@ -10,8 +10,8 @@ Deterministic and fast on purpose (same question -> same answer, and the numbers
 """
 import re
 import threading
+import logging
 import time
-import traceback
 from dataclasses import dataclass, field
 from functools import cached_property
 
@@ -237,7 +237,7 @@ def warm_up() -> None:
         d = Data()
         d.rep, d.opt  # noqa: B018  (computing them fills the risk-report and optimizer caches)
     except Exception:
-        traceback.print_exc()  # shows in the container log; the first question will show the error too
+        logging.getLogger(__name__).exception("Assistant warm-up failed")  # the first question shows it too
 
 
 def classify(q: Query) -> list[tuple[str, float]]:

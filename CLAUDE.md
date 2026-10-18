@@ -127,6 +127,17 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   after logout and reboot.
 - The systemd user timer `dashboard-sync.timer` runs `scripts/sync.sh` every minute. It
   fast-forwards to `origin/main`, and reinstalls the venv if `requirements.txt` changed.
+- **Keeping it up (2026-10-18 outage).** The chat failed with `BrokenPipeError` because the container's `conmon` had
+  died: the container had been restarted from inside the one-shot `dashboard-sync.service`, and systemd kills a
+  finished service's leftover processes. Without conmon, every write to stdout/stderr fails. Three guards now:
+  - `scripts/run_detached.sh` runs `deploy.sh` in its own `systemd-run --user --scope`, so conmon outlives the caller.
+    Always restart the container this way from scripts or timers (from an SSH shell it's fine either way).
+  - `dashboard/safe_io.py` (imported first in `app.py`) drops output that can't be written instead of raising, and
+    Hugging Face progress bars are off (`config.setup_hugging_face`).
+  - `scripts/watchdog.sh` runs at the end of every `sync.sh` (via `trap ... EXIT`). It restarts the container when
+    it's missing/stopped, its conmon is gone, or `GET /healthz` (portfolio loads + on-device assistant answers; no
+    Claude call) fails 3 minutes in a row; at most once per 15 min. Log: `~/.cache/prism-watchdog/log`.
+    Dry run: `DRY_RUN=1 scripts/watchdog.sh`.
 
 ## Workflow
 

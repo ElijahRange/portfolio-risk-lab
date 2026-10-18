@@ -103,6 +103,8 @@ HF_MODELS = (FINBERT_MODEL, ASSISTANT_MODEL)
 def setup_hugging_face() -> None:
     """Keep Hugging Face models in data/models; go offline once every model is downloaded (never wait on the network)."""
     os.environ.setdefault("HF_HOME", str(MODELS_DIR))
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")  # no "Loading weights" bars in the server log
+    os.environ.setdefault("TQDM_DISABLE", "1")
     if all((MODELS_DIR / "hub" / f"models--{m.replace('/', '--')}").exists() for m in HF_MODELS):
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
