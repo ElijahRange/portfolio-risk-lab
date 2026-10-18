@@ -34,8 +34,8 @@ code, commits, issues or chat.
 **Data:**
 - Prices come from the team's Bloomberg export (VZ, MMM, RELIANCE (converted INR→USD), WMT, TPB,
   TGT, CB, BA, PM, plus SPX).
-- Real position sizes live in the git-ignored `data/private/portfolio.csv` on the server:
-  MMM 100k, WMT 50k, PM 50k, TGT 150k, RELIANCE 150k, TPB 150k, BA 100k, VZ 100k, CB 150k.
+- Real position sizes (dollar amounts, $1,000,000 total) live only in the git-ignored
+  `data/private/portfolio.csv` on the server. Ask Elijah for them; never write them into the repo.
 - Without those private files (e.g. on your laptop), the app falls back to `data/sample_portfolio.csv`
   and public Yahoo prices.
 
