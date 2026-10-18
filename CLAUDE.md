@@ -97,8 +97,12 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   - Rows of ticker / dollars / sector; live Yahoo lookup per ticker (`data.quote`, cached 1 h); spreadsheet upload
     (Excel/CSV with ticker + dollars, weights or shares; Bloomberg tickers like `TGT US Equity` are converted) fills
     the table for review only.
-  - Save needs the team passcode (`PORTFOLIO_EDIT_PASSCODE` in `.env`, constant-time compare, 5 wrong tries per IP
-    per 15 min). It validates every row, runs `service.check()` (the full analysis) on the candidate file, copies
+  - Flow: Edit portfolio -> passcode prompt (`#pe-lock`) -> editor (`#pe-editor`) -> Save changes (closes the dialog,
+    confirmation in `#pe-flash`). `portfolio_store.unlock()` checks the team passcode (`PORTFOLIO_EDIT_PASSCODE` in
+    `.env`, constant-time compare, 5 wrong tries per IP per 15 min) and returns a signed edit pass (HMAC keyed by the
+    passcode, 30 min) kept in a memory `dcc.Store`; save/restore verify it, so either gunicorn worker accepts it.
+    The dialog is mounted at the top of `app.layout`, so `pe_open` must ignore the call Dash makes when the Portfolio
+    page (and its button) is first drawn (`if not clicks`). Save validates every row, runs `service.check()` (the full analysis) on the candidate file, copies
     the old file to `data/private/history/portfolio-<time>.csv` (last 40 kept), then atomically replaces
     `data/private/portfolio.csv`. The service cache keys on the file's mtime, so every page and the chat update.
     "Restore" re-saves an earlier version through the same checks.

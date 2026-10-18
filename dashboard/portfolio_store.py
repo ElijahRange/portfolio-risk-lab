@@ -1,11 +1,14 @@
 """The on-page portfolio editor's backend: read, check, save, back up and restore the portfolio file.
 
-Saving is guarded by a team passcode (config.edit_passcode(), PORTFOLIO_EDIT_PASSCODE in .env) because the site is
-public. Before anything is written, the new portfolio is run through the full analysis (service.check), so a bad edit
+Editing is guarded by a team passcode (config.edit_passcode(), PORTFOLIO_EDIT_PASSCODE in .env) because the site is
+public. unlock() checks it once and returns a signed edit pass valid for EDIT_PASS_MINUTES; save() and restore() need
+that pass. The pass is an HMAC keyed by the passcode, so either gunicorn worker can check it and changing the passcode
+cancels every pass. Before anything is written, the new portfolio is run through the full analysis (service.check), so a bad edit
 (unknown ticker, no price history) is rejected instead of breaking the site. Every save keeps the previous file in
 data/private/history/, and any of those can be restored from the editor.
 """
 import base64
+import hashlib
 import hmac
 import io
 import os
@@ -19,6 +22,7 @@ import pandas as pd
 
 from . import config, data, service
 
+EDIT_PASS_MINUTES = 30
 _save_lock = threading.Lock()
 _failed_codes: dict = {}  # visitor -> recent wrong-passcode times
 
@@ -52,18 +56,43 @@ def history() -> list[dict]:
 
 # ---------- the passcode ----------
 
-def _check_passcode(passcode: str | None, visitor: str) -> None:
+def _passcode() -> str:
     expected = config.edit_passcode()
     if not expected:
-        raise EditError("Saving is turned off: set PORTFOLIO_EDIT_PASSCODE in the server's .env file.")
+        raise EditError("Editing is turned off: set PORTFOLIO_EDIT_PASSCODE in the server's .env file.")
+    return expected
+
+
+def _sign(expiry: int, passcode: str) -> str:
+    return hmac.new(passcode.encode(), f"prism-edit:{expiry}".encode(), hashlib.sha256).hexdigest()
+
+
+def unlock(passcode: str | None, visitor: str) -> str:
+    """Check the team passcode (5 wrong tries per visitor per 15 minutes) and return an edit pass."""
+    expected = _passcode()
     now = time.time()
     recent = [t for t in _failed_codes.get(visitor, []) if now - t < 900]
     if len(recent) >= 5:
         raise EditError("Too many wrong passcodes. Try again in 15 minutes.")
     if not passcode or not hmac.compare_digest(passcode.encode(), expected.encode()):
         _failed_codes[visitor] = recent + [now]
-        raise EditError("Wrong passcode, so nothing was saved.")
+        raise EditError("Wrong passcode.")
     _failed_codes.pop(visitor, None)
+    expiry = int(now) + EDIT_PASS_MINUTES * 60
+    return f"{expiry}:{_sign(expiry, expected)}"
+
+
+def _check_pass(edit_pass: str | None) -> None:
+    try:
+        expiry, sig = str(edit_pass).split(":", 1)
+        expiry = int(expiry)
+    except ValueError:
+        raise EditError("Unlock the editor with the team passcode first.")
+    if not hmac.compare_digest(sig.encode(), _sign(expiry, _passcode()).encode()):
+        raise EditError("Unlock the editor with the team passcode first.")
+    if expiry < time.time():
+        raise EditError(f"Your edit session timed out after {EDIT_PASS_MINUTES} minutes. Close the editor and unlock "
+                        "it again; nothing was saved.")
 
 
 # ---------- checking and saving ----------
@@ -126,9 +155,9 @@ def _backup(stamp: str) -> None:
         old.unlink()
 
 
-def save(rows: list[dict], passcode: str | None, visitor: str) -> str:
-    """Check the passcode and rows, test the new portfolio end to end, then back up the old file and write the new one."""
-    _check_passcode(passcode, visitor)
+def save(rows: list[dict], edit_pass: str | None) -> str:
+    """Check the edit pass and rows, test the new portfolio end to end, then back up the old file and write the new one."""
+    _check_pass(edit_pass)
     df = clean(rows)
     with _save_lock:
         config.PRIVATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -149,10 +178,10 @@ def save(rows: list[dict], passcode: str | None, visitor: str) -> str:
         os.replace(pending, config.PORTFOLIO_FILE)
     total = df["weight"].abs().sum()
     return (f"Saved {len(df)} holdings, ${total:,.0f} in total. Every page and the assistant now use the new portfolio; "
-            "the previous version is under Restore.")
+            "the previous version can be restored from Edit portfolio.")
 
 
-def restore(name: str | None, passcode: str | None, visitor: str) -> str:
+def restore(name: str | None, edit_pass: str | None) -> str:
     """Make an earlier version current again (it goes through the same checks as a normal save)."""
     if not name:
         raise EditError("Pick a version to restore.")
@@ -165,7 +194,7 @@ def restore(name: str | None, passcode: str | None, visitor: str) -> str:
     if h["weight"].abs().sum() <= 100:  # relative weights from an old file: size them like the site did
         h["weight"] = h["weight"] / h["weight"].abs().sum() * config.PORTFOLIO_AUM
     rows = [{"ticker": r.ticker, "dollars": r.weight, "sector": r.sector} for r in h.itertuples()]
-    return save(rows, passcode, visitor).replace("Saved", "Restored", 1)
+    return save(rows, edit_pass).replace("Saved", "Restored", 1)
 
 
 # ---------- spreadsheet upload ----------
@@ -225,6 +254,6 @@ def parse_upload(contents: str, filename: str, nav: float, sectors: dict) -> tup
         sector = sector if sector in config.SECTORS else sectors.get(ticker)
         rows.append({"ticker": ticker, "dollars": None if dollars is None or dollars != dollars else round(float(dollars)),
                      "sector": sector})
-    note = (f"Loaded {len(rows)} rows from {filename}. Review them, then enter the passcode and save. "
+    note = (f"Loaded {len(rows)} rows from {filename}. Review them, then press Save changes. "
             + " ".join(notes)).strip()
     return rows, note

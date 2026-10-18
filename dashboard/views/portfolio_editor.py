@@ -1,5 +1,7 @@
 """Edit portfolio dialog on the Portfolio page: change holdings and dollar amounts, upload a spreadsheet, restore.
 
+Two stages: a passcode prompt (#pe-lock), then the editor (#pe-editor) with Save changes at the bottom.
+
 The backend (checks, passcode, backups) is dashboard/portfolio_store.py; callbacks are in app.py (pe_*).
 Rows are plain inputs with pattern-matching ids; their values are read back when rows are added, removed or saved.
 """
@@ -48,41 +50,53 @@ def total_line(amounts: list) -> str:
 
 
 def dialog():
-    return html.Div(html.Section([
-        html.Div([
+    return html.Div([
+        dcc.Store(id="pe-pass-token", storage_type="memory"),  # signed edit pass from unlock; gone on reload
+        dcc.Store(id="pe-focus"),
+        html.Section([
+            html.Button("×", id="pe-close", className="chat-icon-btn chat-x pe-close", title="Close",
+                        **{"aria-label": "Close the editor"}),
             html.Div([
                 html.H3("Edit portfolio", id="pe-title", className="card-title"),
-                html.P("Change holdings and their dollar amounts. Saving updates every page and the assistant; the "
-                       "previous version is kept so you can restore it.", className="card-desc"),
-            ]),
-            html.Button("×", id="pe-close", className="chat-icon-btn chat-x", title="Close",
-                        **{"aria-label": "Close the editor"}),
-        ], className="pe-head"),
-        html.Div([
-            dcc.Upload(html.Button("Upload spreadsheet", className="btn"), id="pe-upload", accept=".xlsx,.xls,.csv",
-                       max_size=2_000_000),
-            html.Span("Excel or CSV with a ticker column and a dollar (or shares) column. It fills the table below for "
-                      "you to review; nothing is saved until you press Save.", className="muted small"),
-        ], className="pe-toolbar"),
-        html.Div([html.Span("Ticker"), html.Span("Dollars"), html.Span("Sector"), html.Span("Company · price"),
-                  html.Span("")], className="pe-row pe-row-head"),
-        html.Div(id="pe-rows", className="pe-rows"),
-        html.Div([
-            html.Button("+ Add holding", id="pe-add", className="btn"),
-            html.Span(id="pe-total", className="pe-total mono"),
-        ], className="pe-add-row"),
-        html.Div(id="pe-status"),
-        html.Div([
+                html.P("Enter the team passcode to change the portfolio.", className="card-desc"),
+                html.Div([
+                    dcc.Input(id="pe-pass", type="password", placeholder="Team passcode", debounce=False,
+                              name="passcode", autoComplete="current-password", className="pe-field pe-pass"),
+                    html.Button("Unlock", id="pe-unlock", className="btn btn-primary"),
+                ], className="pe-unlock-row"),
+                html.Div(id="pe-lock-status"),
+            ], id="pe-lock", className="pe-stage"),
             html.Div([
-                dcc.Dropdown(id="pe-history", placeholder="Earlier versions", clearable=True, searchable=False,
-                             className="pe-history"),
-                html.Button("Restore", id="pe-restore", className="btn"),
-            ], className="pe-restore-group"),
-            html.Div([
-                dcc.Input(id="pe-pass", type="password", placeholder="Team passcode", autoComplete="current-password",
-                          debounce=False, name="passcode", className="pe-field pe-pass"),
-                html.Button("Save portfolio", id="pe-save", className="btn btn-primary"),
-            ], className="pe-save-group"),
-        ], className="pe-foot"),
-    ], className="pe-dialog", role="dialog", **{"aria-modal": "true", "aria-labelledby": "pe-title"}),
-        id="pe-overlay", className="pe-overlay")
+                html.Div([
+                    html.H3("Edit portfolio", className="card-title"),
+                    html.P("Change holdings and their dollar amounts; the total becomes NAV. Save changes updates "
+                           "every page and the assistant, and keeps the previous version so you can restore it.",
+                           className="card-desc"),
+                ], className="pe-head"),
+                html.Div([
+                    dcc.Upload(html.Button("Upload spreadsheet", className="btn"), id="pe-upload",
+                               accept=".xlsx,.xls,.csv", max_size=2_000_000),
+                    html.Span("Excel or CSV with a ticker column and a dollar (or shares) column. It fills the table "
+                              "below for you to review; nothing changes until you press Save changes.",
+                              className="muted small"),
+                ], className="pe-toolbar"),
+                html.Div([html.Span("Ticker"), html.Span("Dollars"), html.Span("Sector"),
+                          html.Span("Company · price"), html.Span("")], className="pe-row pe-row-head"),
+                html.Div(id="pe-rows", className="pe-rows"),
+                html.Div([
+                    html.Button("+ Add holding", id="pe-add", className="btn"),
+                    html.Span(id="pe-total", className="pe-total mono"),
+                ], className="pe-add-row"),
+                html.Div([
+                    dcc.Dropdown(id="pe-history", placeholder="Earlier versions", clearable=True, searchable=False,
+                                 className="pe-history"),
+                    html.Button("Restore", id="pe-restore", className="btn"),
+                ], className="pe-restore-group"),
+                html.Div(id="pe-status"),
+                html.Div([
+                    html.Button("Cancel", id="pe-cancel", className="btn"),
+                    html.Button("Save changes", id="pe-save", className="btn btn-primary"),
+                ], className="pe-foot"),
+            ], id="pe-editor", className="pe-stage hidden"),
+        ], className="pe-dialog", role="dialog", **{"aria-modal": "true", "aria-labelledby": "pe-title"}),
+    ], id="pe-overlay", className="pe-overlay")

@@ -437,11 +437,18 @@ a { color: inherit; text-decoration: none; }
   padding: 48px 16px; overflow-y: auto; background: rgba(5,7,10,.72);
 }
 .pe-overlay.open { display: flex; }
+.pe-overlay:has(#pe-lock:not(.hidden)) { align-items: center; }
 .pe-dialog {
-  width: min(920px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  position: relative; width: min(920px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 24px 64px rgba(0,0,0,.6); padding: 18px 20px 20px;
 }
-.pe-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.pe-dialog:has(#pe-lock:not(.hidden)) { width: min(420px, 100%); }  /* the passcode prompt is a small card */
+.pe-stage.hidden { display: none; }
+.pe-close { position: absolute; top: 12px; right: 12px; }
+.pe-head { margin-bottom: 14px; padding-right: 36px; }
+.pe-unlock-row { display: flex; gap: 8px; margin: 14px 0 4px; }
+.pe-unlock-row .pe-pass { flex: 1; }
+#pe-lock-status .alert { margin: 10px 0 0; }
 .pe-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .pe-toolbar .muted { flex: 1; min-width: 220px; }
 .pe-row { display: grid; grid-template-columns: 130px 150px minmax(170px, 1fr) minmax(170px, 1.2fr) 32px; gap: 8px; align-items: center; }
@@ -463,12 +470,11 @@ a { color: inherit; text-decoration: none; }
 .pe-remove:hover { color: var(--neg); border-color: var(--border); }
 .pe-add-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 12px 0 14px; flex-wrap: wrap; }
 .pe-total { color: var(--text); font-size: 13px; }
-.pe-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding-top: 14px; border-top: 1px solid var(--border); margin-top: 6px; }
-.pe-restore-group, .pe-save-group { display: flex; gap: 8px; align-items: center; }
+.pe-restore-group { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
 .pe-history { width: 260px; }
-.pe-pass { width: 180px; }
-#pe-status .alert { margin: 0 0 6px; }
+#pe-status .alert { margin: 0 0 12px; }
+.pe-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+#pe-flash .alert { margin-bottom: 12px; }
 @media (max-width: 760px) {
   .pe-overlay { padding: 0; }
   .pe-dialog { min-height: 100%; border: none; border-radius: 0; }
@@ -480,7 +486,7 @@ a { color: inherit; text-decoration: none; }
   .pe-row > :nth-child(4) { grid-column: 1 / 4; grid-row: 3; }
   .pe-row-head { display: none; }
   .pe-row + .pe-row { margin-top: 0; padding-top: 10px; border-top: 1px solid var(--border); }
-  .pe-history, .pe-pass { width: 100%; }
-  .pe-restore-group, .pe-save-group { width: 100%; }
+  .pe-history { width: 100%; }
+  .pe-dialog:has(#pe-lock:not(.hidden)) { min-height: 0; margin: 0 16px; border: 1px solid var(--border); }
 }
 .pe-amount .dash-input-stepper { display: none; }  /* +/- 1 steps are no use for dollar amounts */

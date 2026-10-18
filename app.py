@@ -70,6 +70,7 @@ def portfolio_page(tab: str = "overview"):
                      className="page-actions"),
         ], className="page-head"),
         html.Div(id="alerts"),
+        html.Div(id="pe-flash"),  # "Saved ..." after Edit portfolio
         dcc.Tabs(
             id="tabs", value=tab if tab in TABS else "overview", className="tabs", parent_className="tabs-parent",
             children=[dcc.Tab(label=label, value=key, className="tab", selected_className="tab--active")
@@ -290,28 +291,58 @@ def healthz():
 
 
 # ---------- Portfolio editor (Portfolio page > Edit portfolio) ----------
+# Edit portfolio -> passcode prompt -> editor -> Save changes. Unlocking returns a signed edit pass (30 min) that
+# every save must carry; the dialog closes and the page shows a confirmation when the save succeeds.
 
 PE_ROWS = [State({"type": "pe-ticker", "index": ALL}, "value"), State({"type": "pe-amount", "index": ALL}, "value"),
            State({"type": "pe-sector", "index": ALL}, "value")]
+PE_LOCKED, PE_UNLOCKED = ("pe-stage", "pe-stage hidden"), ("pe-stage hidden", "pe-stage")  # (prompt, editor) classes
 
 
 def _pe_rows(tickers, amounts, sectors) -> list[dict]:
     return [{"ticker": t, "dollars": a, "sector": s} for t, a, s in zip(tickers, amounts, sectors)]
 
 
-@app.callback(Output("pe-rows", "children"), Output("pe-history", "options"), Output("pe-overlay", "className"),
-              Output("pe-status", "children"), Input("pe-open", "n_clicks"), prevent_initial_call=True)
-def pe_open(_):
+@app.callback(Output("pe-overlay", "className"), Output("pe-lock", "className"), Output("pe-editor", "className"),
+              Output("pe-lock-status", "children"), Output("pe-pass", "value"), Output("pe-pass-token", "data"),
+              Input("pe-open", "n_clicks"), prevent_initial_call=True)
+def pe_open(clicks):
+    if not clicks:  # the button was just drawn with the Portfolio page, not clicked
+        return (no_update,) * 6
+    return "pe-overlay open", *PE_LOCKED, None, "", None
+
+
+@app.callback(Output("pe-lock", "className", allow_duplicate=True), Output("pe-editor", "className", allow_duplicate=True),
+              Output("pe-lock-status", "children", allow_duplicate=True), Output("pe-pass", "value", allow_duplicate=True),
+              Output("pe-pass-token", "data", allow_duplicate=True), Output("pe-rows", "children"),
+              Output("pe-history", "options"), Output("pe-status", "children"),
+              Input("pe-unlock", "n_clicks"), Input("pe-pass", "n_submit"), State("pe-pass", "value"),
+              prevent_initial_call=True)
+def pe_unlock(_clicks, _submit, passcode):
     try:
-        rows, status = portfolio_store.current_rows(service.current_analysis()), None
+        edit_pass = portfolio_store.unlock(passcode, request.remote_addr or "?")
+        rows = portfolio_store.current_rows(service.current_analysis())
+    except portfolio_store.EditError as exc:
+        return no_update, no_update, ui.alert(str(exc), tone="warn"), "", no_update, no_update, no_update, no_update
     except Exception as exc:
-        rows, status = [], ui.alert("Couldn't load the current portfolio", f"{type(exc).__name__}: {exc}", "warn")
-    return portfolio_editor.rows(rows), portfolio_store.history(), "pe-overlay open", status
+        return (no_update, no_update, ui.alert("Couldn't open the editor", f"{type(exc).__name__}: {exc}", "error"),
+                "", no_update, no_update, no_update, no_update)
+    return *PE_UNLOCKED, None, "", edit_pass, portfolio_editor.rows(rows), portfolio_store.history(), None
 
 
-app.clientside_callback("function() { return 'pe-overlay'; }",
-                        Output("pe-overlay", "className", allow_duplicate=True), Input("pe-close", "n_clicks"),
-                        prevent_initial_call=True)
+app.clientside_callback("function() { return ['pe-overlay', null]; }",
+                        Output("pe-overlay", "className", allow_duplicate=True),
+                        Output("pe-pass-token", "data", allow_duplicate=True),
+                        Input("pe-close", "n_clicks"), Input("pe-cancel", "n_clicks"), prevent_initial_call=True)
+
+app.clientside_callback(
+    """function(lockClass, overlayClass) {
+        if ((overlayClass || '').indexOf('open') >= 0 && (lockClass || '').indexOf('hidden') < 0) {
+            setTimeout(function () { var el = document.getElementById('pe-pass'); if (el) { el.focus(); } }, 60);
+        }
+        return Date.now();
+    }""",
+    Output("pe-focus", "data"), Input("pe-lock", "className"), Input("pe-overlay", "className"))
 
 
 @app.callback(Output("pe-rows", "children", allow_duplicate=True), Output("pe-status", "children", allow_duplicate=True),
@@ -348,24 +379,22 @@ def pe_total(amounts):
     return portfolio_editor.total_line(amounts)
 
 
-@app.callback(Output("pe-status", "children", allow_duplicate=True), Output("refreshed-at", "data", allow_duplicate=True),
-              Output("pe-history", "options", allow_duplicate=True), Output("pe-rows", "children", allow_duplicate=True),
-              Output("pe-pass", "value"),
-              Input("pe-save", "n_clicks"), Input("pe-pass", "n_submit"), Input("pe-restore", "n_clicks"),
-              State("pe-history", "value"), State("pe-pass", "value"), *PE_ROWS, prevent_initial_call=True)
-def pe_save(_save, _submit, _restore, version, passcode, tickers, amounts, sectors):
-    visitor = request.remote_addr or "?"
+@app.callback(Output("pe-status", "children", allow_duplicate=True), Output("pe-overlay", "className", allow_duplicate=True),
+              Output("refreshed-at", "data", allow_duplicate=True), Output("pe-flash", "children"),
+              Output("pe-pass-token", "data", allow_duplicate=True),
+              Input("pe-save", "n_clicks"), Input("pe-restore", "n_clicks"),
+              State("pe-history", "value"), State("pe-pass-token", "data"), *PE_ROWS, prevent_initial_call=True)
+def pe_save(_save, _restore, version, edit_pass, tickers, amounts, sectors):
     try:
         if ctx.triggered_id == "pe-restore":
-            message = portfolio_store.restore(version, passcode, visitor)
+            message = portfolio_store.restore(version, edit_pass)
         else:
-            message = portfolio_store.save(_pe_rows(tickers, amounts, sectors), passcode, visitor)
-        rows = portfolio_editor.rows(portfolio_store.current_rows(service.current_analysis()))
+            message = portfolio_store.save(_pe_rows(tickers, amounts, sectors), edit_pass)
     except portfolio_store.EditError as exc:
         return ui.alert("Not saved", str(exc), "warn"), no_update, no_update, no_update, no_update
     except Exception as exc:
         return ui.alert("Not saved", f"{type(exc).__name__}: {exc}", "error"), no_update, no_update, no_update, no_update
-    return ui.alert(message, tone="ok"), time.time(), portfolio_store.history(), rows, ""
+    return None, "pe-overlay", time.time(), ui.alert(message, tone="ok"), None  # close, refresh the tab, confirm
 
 
 # ---------- Portfolio assistant (chat bubble on every page) ----------
