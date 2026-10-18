@@ -1,5 +1,5 @@
 /* Portfolio Risk Lab design tokens. Plotly colours live in dashboard/theme.py — keep both in sync. */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Silkscreen:wght@400;700&display=swap");
 
 :root {
   --bg: #0c0e13;
@@ -13,6 +13,7 @@
   --pos: #22a35a;
   --neg: #e5484d;
   --warn: #e0a339;
+  --violet: #9b7ae6;
   --radius: 2px;
   --sidebar-w: 240px;
   --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -25,13 +26,29 @@ a { color: inherit; text-decoration: none; }
 
 /* ---------- shell ---------- */
 .shell { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100vh; }
+/* The sidebar is a night sky: surface colour at the top, deepening to indigo with a faint glow at the horizon. */
 .sidebar {
-  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
-  background: var(--surface); border-right: 1px solid var(--border);
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  border-right: 1px solid var(--border);
+  background:
+    radial-gradient(130% 40% at 50% 108%, rgba(155,122,230,.13), transparent 70%),
+    linear-gradient(180deg, var(--surface) 0%, #121625 55%, #151a2f 100%);
 }
-.brand { padding: 18px 20px; border-bottom: 1px solid var(--border); text-align: center; }
-.brand-name { color: var(--primary); font-weight: 700; font-size: 15px; }
-.brand-sub { color: var(--muted); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; margin-top: 2px; }
+.sidebar > :not(.sky) { position: relative; z-index: 1; }
+.brand { padding: 22px 18px 18px; border-bottom: 1px solid var(--border); text-align: center; }
+.brand-logo { display: block; width: 96px; height: 56px; margin: 0 auto 12px; image-rendering: pixelated; }
+.brand-name {
+  font-family: "Silkscreen", var(--mono); font-weight: 700; font-size: 30px; line-height: 1; letter-spacing: .08em;
+  color: var(--text-strong); text-shadow: 0 0 14px rgba(58,142,230,.35);
+}
+.brand-expansion { max-width: 22ch; margin: 10px auto 0; font-size: 12px; line-height: 1.45; color: var(--text); }
+.brand-initial { font-weight: 700; }
+.brand-initial.i0 { color: var(--neg); }
+.brand-initial.i1 { color: var(--warn); }
+.brand-initial.i2 { color: var(--pos); }
+.brand-initial.i3 { color: var(--primary); }
+.brand-initial.i4 { color: var(--violet); }
+.brand-sub { margin-top: 10px; color: var(--muted); font-size: 11px; }
 .sidebar nav { flex: 1; padding: 8px 0; }
 .nav-group { padding: 18px 20px 8px; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .nav-link { display: block; padding: 10px 20px; color: var(--text); border-left: 2px solid transparent; }
@@ -45,6 +62,9 @@ a { color: inherit; text-decoration: none; }
   position: sticky; top: 0; z-index: 10; height: 56px; display: flex; align-items: center;
   padding: 0 24px; background: var(--bg); border-bottom: 1px solid var(--border);
 }
+.header-title { position: relative; z-index: 1; }
+.main { position: relative; }
+.page { position: relative; z-index: 1; }
 .header-title { font-size: 20px; font-weight: 600; margin: 0; color: var(--text-strong); }
 .page { padding: 24px; max-width: 1480px; }
 
@@ -255,8 +275,12 @@ a { color: inherit; text-decoration: none; }
   .script-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 }
 @media (max-width: 760px) {
+  .sky-page { left: 0; }
+  .brand { padding: 16px 16px 12px; }
+  .brand-logo { width: 72px; height: 42px; margin-bottom: 8px; }
+  .brand-name { font-size: 24px; }
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: static; height: auto; }
+  .sidebar { position: relative; z-index: 2; height: auto; }  /* keeps its sky inside and covers the page's */
   .sidebar nav { display: flex; flex-wrap: wrap; padding: 0 8px 8px; }
   .nav-group, .sidebar-foot { display: none; }
   .page { padding: 16px; }
@@ -349,4 +373,50 @@ a { color: inherit; text-decoration: none; }
   .chat-launcher { right: 16px; bottom: 16px; }
   .chat-launcher.open { display: none; }
   .chat-input .dash-input-element { font-size: 16px; }  /* 16px stops phones zooming into the field */
+}
+
+/* ---------- PRISM night sky (views/sky.py): pixel stars, glinting prisms, shooting stars ---------- */
+.sky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.sky-page { position: fixed; top: 56px; left: var(--sidebar-w); right: 0; bottom: 0; }
+/* Sprites are 2px pixels: the element is one pixel, box-shadows draw the rest in currentColor. */
+.star {
+  position: absolute; width: 2px; height: 2px; color: #e6e9ee; background: currentColor;
+  opacity: var(--lo, .1); animation: twinkle var(--dur, 4s) ease-in-out var(--delay, 0s) infinite;
+}
+.star.sparkle {
+  background: #fff;
+  box-shadow: 0 -2px currentColor, -2px 0 currentColor, 2px 0 currentColor, 0 2px currentColor,
+    0 -4px color-mix(in srgb, currentColor 40%, transparent), -4px 0 color-mix(in srgb, currentColor 40%, transparent),
+    4px 0 color-mix(in srgb, currentColor 40%, transparent), 0 4px color-mix(in srgb, currentColor 40%, transparent);
+}
+.star.prism {
+  color: #cad0d8;
+  box-shadow: -2px 2px currentColor, 0 2px color-mix(in srgb, var(--glint) 55%, transparent), 2px 2px currentColor,
+    -4px 4px currentColor, -2px 4px color-mix(in srgb, var(--glint) 45%, transparent), 0 4px var(--glint),
+    2px 4px color-mix(in srgb, var(--glint) 45%, transparent), 4px 4px currentColor,
+    -6px 6px currentColor, -4px 6px currentColor, -2px 6px currentColor, 0 6px currentColor, 2px 6px currentColor,
+    4px 6px currentColor, 6px 6px currentColor;
+  animation: twinkle var(--dur, 4s) ease-in-out var(--delay, 0s) infinite,
+    glint calc(var(--dur, 4s) * 2) linear var(--delay, 0s) infinite;
+}
+@keyframes twinkle { 0%, 100% { opacity: var(--lo, .1); } 50% { opacity: var(--hi, .9); } }
+@keyframes glint { to { filter: hue-rotate(360deg); } }
+/* A shooting star: the element's right end is the head; it streaks for ~8% of its cycle, then waits. */
+.shooting {
+  position: absolute; width: 72px; height: 2px; margin-left: -72px; opacity: 0; transform-origin: 100% 50%;
+  background: linear-gradient(90deg, rgba(230,233,238,0), rgba(230,233,238,.5) 70%, #fff);
+  animation: shoot var(--cycle, 15s) linear var(--delay, 0s) infinite;
+}
+.shooting::after {
+  content: ""; position: absolute; right: -1px; top: -1px; width: 4px; height: 4px; background: #fff;
+  box-shadow: 0 0 8px 2px rgba(155,122,230,.7);
+}
+@keyframes shoot {
+  0% { opacity: 0; transform: translate(0, 0) rotate(var(--angle)); }
+  1%, 6% { opacity: 1; }
+  8%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--angle)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star { animation: none; opacity: calc(var(--hi, .9) * .6); }
+  .shooting { display: none; }
 }

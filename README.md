@@ -1,4 +1,4 @@
-# Portfolio Risk Lab
+# PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring)
 
 A chart-heavy portfolio risk dashboard for the IBM Z Datathon, running on an
 IBM LinuxONE (s390x) virtual server.
@@ -18,7 +18,7 @@ git clone https://github.com/ElijahRange/portfolio-risk-lab.git
 cd portfolio-risk-lab
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-local.txt
-export SEC_USER_AGENT="Portfolio Risk Lab your.email@example.com"   # for Company Research
+export SEC_USER_AGENT="PRISM your.email@example.com"   # for Company Research
 python app.py                           # http://127.0.0.1:8050 on your laptop
 ```
 

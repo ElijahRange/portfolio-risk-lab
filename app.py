@@ -1,4 +1,4 @@
-"""Portfolio Risk Lab: Dash entry point. Gunicorn serves `app:server`."""
+"""PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring): Dash entry point. Gunicorn serves `app:server`."""
 import os
 import platform
 import threading
@@ -9,7 +9,7 @@ from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
 from dashboard import ai_chat, assistant, config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
-from dashboard.views import chat, factors, idio, notes, overview, ratio_testing, research, risk
+from dashboard.views import chat, factors, idio, notes, overview, ratio_testing, research, risk, sky
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
@@ -29,9 +29,22 @@ def nav_link(label, href):
     return dcc.Link(html.Span(label), href=href, className="nav-link", id=f"nav-{label.lower().replace(' ', '-')}")
 
 
+def brand():
+    """Pixel logo, the PRISM wordmark and what it stands for, each initial in the colour of its spectrum ray."""
+    expansion = []
+    for i, word in enumerate(["Portfolio ", "Risk ", "Insights, ", "Stress-testing, and ", "Monitoring"]):
+        expansion += [html.Span(word[0], className=f"brand-initial i{i}"), word[1:]]
+    return html.Div([
+        html.Img(src=app.get_asset_url("prism-logo.svg"), alt="", className="brand-logo"),
+        html.Div(config.APP_TITLE, className="brand-name"),
+        html.Div(expansion, className="brand-expansion", title=config.APP_FULL_NAME),
+        html.Div("IBM Z Datathon 2026", className="brand-sub"),
+    ], className="brand")
+
+
 sidebar = html.Aside([
-    html.Div([html.Div(config.APP_TITLE, className="brand-name"), html.Div("IBM Z Datathon", className="brand-sub")],
-             className="brand"),
+    sky.sidebar(),
+    brand(),
     html.Nav([
         html.Div("Workspace", className="nav-group"),
         nav_link("Portfolio", "/"),
@@ -67,7 +80,8 @@ app.layout = html.Div([
         dcc.Store(id="refreshed-at"),
         sidebar,
         html.Div([
-            html.Header([html.H1(id="header-title", className="header-title")], className="topbar"),
+            sky.page(),
+            html.Header([html.H1(id="header-title", className="header-title"), sky.topbar()], className="topbar"),
             html.Main(id="page", className="page"),
         ], className="main"),
     ], className="shell"),

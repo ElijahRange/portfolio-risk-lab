@@ -19,8 +19,8 @@ from flask import has_request_context, request
 from . import assistant, config, optimizer, research_store
 from . import components as ui
 
-SYSTEM = """You are the portfolio assistant inside Portfolio Risk Lab, a dashboard a student team built for the IBM Z \
-Datathon 2026. It analyses the team's real, $1,000,000, nine-stock portfolio. Answer the user's question from the \
+SYSTEM = """You are the portfolio assistant inside PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring), \
+a dashboard a student team built for the IBM Z Datathon 2026. It analyses the team's real, $1,000,000, nine-stock portfolio. Answer the user's question from the \
 DASHBOARD DATA below.
 
 How to answer:

@@ -1,4 +1,4 @@
-# Portfolio Risk Lab: guide for the team and AI coding agents
+# PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring): guide for the team and AI coding agents
 
 This file is the starting point for anyone (or any coding agent: Codex, Claude Code, Copilot…)
 working on this repo. Read it fully before changing code. `CLAUDE.md` has the same technical
@@ -13,7 +13,8 @@ notes in more detail; keep both in sync when you change something important.
   of LinuxONE + AI/ML, and execution (each out of 10).
 - **Deliverable:** a video of at most 3 minutes covering the problem, the data, the solution, and how
   it uses IBM Z (tech stack, LinuxONE instance, model).
-- **The product:** "Portfolio Risk Lab", a dark-themed Dash dashboard that analyses the team's real
+- **The product:** "PRISM" (Portfolio Risk Insights, Stress-testing, and Monitoring; formerly "Portfolio Risk Lab"), a
+  dark-themed Dash dashboard that analyses the team's real
   9-stock, $1,000,000 portfolio and researches any US company.
 
 **Live site:** http://148.100.98.18:8050 (public, no login).
@@ -50,7 +51,7 @@ git clone https://github.com/ElijahRange/portfolio-risk-lab.git
 cd portfolio-risk-lab
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-local.txt
-export SEC_USER_AGENT="Portfolio Risk Lab your.email@example.com"   # needed by Company Research
+export SEC_USER_AGENT="PRISM your.email@example.com"   # needed by Company Research
 python app.py                                     # http://127.0.0.1:8050
 ```
 
@@ -155,6 +156,12 @@ Design language:
 - **Charts:** Plotly with the `risklab` template (transparent background, faint grid). Height 300–380px
   in a card, 520px for a hero chart. Diverging bars for betas/exposures. Always set hover templates with
   formatted numbers. No mode bar, no scroll-zoom (`ui.graph` handles this).
+- **Brand and sky (2026-10-18):** the sidebar shows the pixel PRISM logo (`assets/prism-logo.svg`, a prism splitting
+  light into the five accent colours) and the name with each initial in its ray's colour. A night sky of pixel stars,
+  glinting mini-prisms and occasional shooting stars sits behind the sidebar, top bar and page gaps
+  (`views/sky.py`, `.sky` styles at the end of `style.css`). It is decoration only: keep it behind content
+  (cards stay opaque), keep it faint on the page, and keep the `prefers-reduced-motion` rule working. The wordmark font is
+  Silkscreen; don't use it for body text or numbers.
 - **Words:** short card titles, one-sentence muted descriptions that say what the chart means in plain
   English (judges aren't all finance people), and `ui.alert` for warnings/info.
 - **Numbers:** `ui.pct`, `ui.usd`, `ui.num`. Signed where direction matters; colour with `ui.tone_class`.

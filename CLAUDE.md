@@ -1,4 +1,6 @@
-# Portfolio Risk Lab: notes for Claude
+# PRISM (Portfolio Risk Insights, Stress-testing, and Monitoring): notes for Claude
+
+Formerly "Portfolio Risk Lab" (renamed 2026-10-18; the repo keeps its name).
 
 Team-wide guide (also read by Codex and other agents): `AGENTS.md`. Keep both in sync.
 
@@ -95,6 +97,8 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   are cached per ticker as CSV in `data/cache/` for 12 hours.
 - `dashboard/views/*.py`: each exposes `layout(analysis)`. Adding a tab means adding a
   view and registering it in `TABS` in `app.py`.
+- Brand: pixel logo `assets/prism-logo.svg` (+ `favicon.ico`), Silkscreen wordmark, night-sky decoration from
+  `views/sky.py` (deterministic star positions; sprites are CSS box-shadow pixels; respects reduced motion).
 - Styling: CSS tokens in `assets/style.css` and the Plotly template in
   `dashboard/theme.py`. Keep the colours in sync. Numbers use the mono font.
 - `dashboard/s390x_fix.py` **must stay imported** (theme.py imports it). Plotly encodes

@@ -2,7 +2,8 @@
 import os
 from pathlib import Path
 
-APP_TITLE = "Portfolio Risk Lab"
+APP_TITLE = "PRISM"
+APP_FULL_NAME = "Portfolio Risk Insights, Stress-testing, and Monitoring"
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
