@@ -124,6 +124,15 @@ def filter_positions(side):
         return no_update
 
 
+@app.callback(Output("geo-graph", "figure"), Input("geo-color", "value"), Input("geo-layers", "value"),
+              prevent_initial_call=True)
+def update_geometry(color_by, layers):
+    try:
+        return risk.geometry_figure(service.current_analysis(), color_by, layers or [])
+    except Exception:
+        return no_update
+
+
 @app.callback(Output("idio-detail", "children"), Output({"type": "idio-row", "index": ALL}, "className"),
               Input({"type": "idio-row", "index": ALL}, "n_clicks"), State({"type": "idio-row", "index": ALL}, "id"),
               prevent_initial_call=True)

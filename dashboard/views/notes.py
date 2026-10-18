@@ -35,7 +35,10 @@ def layout():
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "
                     "covariance of returns."),
             html.Li("Risk geometry: principal component analysis (PCA) of the positions' return correlations; "
-                    "each axis is named after the factor ETFs it tracks most closely."),
+                    "each axis is named after the factor ETFs it tracks most closely and shows its share of "
+                    "variance. Risk groups come from Ward hierarchical clustering on the correlation distance "
+                    "sqrt((1 - ρ) / 2), about one group per three names; links join the "
+                    "most correlated ~30% of pairs (ρ ≥ 0.15)."),
         ], className="notes")),
         ui.card("Where this runs", html.Ul([
             html.Li(f"Machine architecture: {platform.machine()} (IBM LinuxONE / IBM Z)"),

@@ -23,8 +23,10 @@ class Analysis:
     rolling_beta: pd.Series
     factor_table: pd.DataFrame       # index = factor name
     risk_split: dict                 # annualised variance: factor / idiosyncratic
-    pca_points: pd.DataFrame         # ticker, side, weight, pc1..pc3
+    pca_points: pd.DataFrame         # ticker, side, weight, pc1..pc3, group
     pca_labels: list[str]
+    pca_explained: list[float]       # share of total variance per principal component (all of them)
+    pca_corr: pd.DataFrame           # return correlations of every position
     corr: pd.DataFrame
     idio: "IdioRisk"
     history: pd.DataFrame            # full daily return history of the holdings + benchmark (for the optimizer)
@@ -66,11 +68,13 @@ def _pca(R: pd.DataFrame, weights: pd.Series, factor_raw: pd.DataFrame):
     std = R.std()
     R = R.loc[:, std > 0]
     if R.shape[1] < 3:
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], [], pd.DataFrame()
     Z = (R - R.mean()) / R.std()
-    eigval, eigvec = np.linalg.eigh(np.corrcoef(Z.to_numpy(), rowvar=False))
-    order = np.argsort(eigval)[::-1][:3]
-    eigval, eigvec = eigval[order], eigvec[:, order]
+    rho = np.corrcoef(Z.to_numpy(), rowvar=False)
+    eigval, eigvec = np.linalg.eigh(rho)
+    order = np.argsort(eigval)[::-1]
+    explained = list(np.clip(eigval[order], 0, None) / R.shape[1])
+    eigval, eigvec = eigval[order[:3]], eigvec[:, order[:3]]
     # Fix sign so the largest loading on each PC is positive (eigenvectors have arbitrary sign).
     eigvec = eigvec * np.sign(eigvec[np.abs(eigvec).argmax(axis=0), range(3)])
     loadings = eigvec * np.sqrt(eigval)
@@ -85,7 +89,30 @@ def _pca(R: pd.DataFrame, weights: pd.Series, factor_raw: pd.DataFrame):
         corr = factor_raw.apply(lambda col: np.corrcoef(col, pc_series[:, k])[0, 1])
         top = corr.abs().sort_values(ascending=False).index[:2]
         labels.append(f"PC{k + 1} · {' / '.join(top)}")
-    return points, labels
+    rho = pd.DataFrame(rho, index=R.columns, columns=R.columns)
+    points["group"] = points["ticker"].map(_groups(rho, points.set_index("ticker")["weight"]))
+    return points, labels, explained, rho
+
+
+def _groups(corr: pd.DataFrame, weights: pd.Series) -> pd.Series:
+    """Group names whose returns move together.
+
+    Ward hierarchical clustering on the correlation distance sqrt((1 - rho) / 2), which is a true
+    Euclidean distance between the standardised return series. About one group per three names
+    (2 to 5 groups). Groups are lettered A, B, ... by total weight.
+    """
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+
+    n = len(corr)
+    if n < 4:
+        return pd.Series("A", index=corr.index)
+    D = np.sqrt(np.clip((1 - corr.to_numpy()) / 2, 0, None))
+    np.fill_diagonal(D, 0)
+    k = int(np.clip(round(n / 3), 2, 5))
+    labels = pd.Series(fcluster(linkage(squareform(D, checks=False), "ward"), k, "maxclust"), index=corr.index)
+    order = weights.abs().groupby(labels).sum().sort_values(ascending=False).index
+    return labels.map({g: chr(65 + i) for i, g in enumerate(order)})
 
 
 def _newey_west_se(X: np.ndarray, e: np.ndarray) -> np.ndarray:
@@ -293,7 +320,7 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
 
     factor_raw = rets[[e for e in config.FACTORS.values() if e in rets]].fillna(0.0)
     factor_raw.columns = [n for n, e in config.FACTORS.items() if e in rets]
-    pca_points, pca_labels = _pca(R, w, factor_raw)
+    pca_points, pca_labels, pca_explained, pca_corr = _pca(R, w, factor_raw)
     if not pca_points.empty:
         pca_points["side"] = pca_points["ticker"].map(h.set_index("ticker")["side"])
 
@@ -312,6 +339,8 @@ def build(holdings: pd.DataFrame, prices: pd.DataFrame, source: str, failed: lis
         risk_split={"factor": factor_var, "idiosyncratic": specific_var},
         pca_points=pca_points,
         pca_labels=pca_labels,
+        pca_explained=pca_explained,
+        pca_corr=pca_corr,
         corr=R[top].corr(),
         idio=_idiosyncratic(R, bench.rename(benchmark), w, full_rets, nav),
         history=_history(full_rets, list(w.index), benchmark),
