@@ -52,6 +52,29 @@ stock portfolio. It runs on an IBM LinuxONE VM (RHEL 9.8, **s390x, big-endian**)
   - Preload demo companies: `podman exec dashboard .venv/bin/python scripts/research_preload.py [TICKERS]`.
   - Limits: press releases, not call transcripts (no analyst Q&A); foreign filers on Form 6-K
     (e.g. RELIANCE) aren't covered.
+- Portfolio assistant: a chat bubble fixed bottom-right on **every page** (`views/chat.py`, mounted in
+  `app.layout` outside `html.Main(id="page")`, so it survives navigation). Callbacks are in `app.py`
+  (`chat_ask`, `chat_render`, plus clientside open/close and scroll); `assets/chat.js` adds Escape-to-close
+  and tab switching for its links.
+  - `dashboard/assistant.py`: deterministic on purpose. Hugging Face `sentence-transformers/all-MiniLM-L6-v2`
+    (`config.ASSISTANT_MODEL`, loaded with `transformers` `AutoModel` + mean pooling, cached in `data/models`)
+    embeds the question; the closest example phrasing (cosine) picks one of ~30 intents in `INTENTS`, plus a
+    small bonus for telltale words. Below `config.ASSISTANT_THRESHOLD` it lists what it can answer instead.
+  - Regex code pulls out tickers/company names (`COMPANIES` aliases), VaR level, stress scenario, S&P shock
+    size and optimizer goal; names are masked to "the stock" and shorthand (VaR, P&L, NAV…) spelled out
+    before embedding.
+  - Every answer is a template filled from the same objects the pages use (`service`, `risk_metrics.report`,
+    `optimizer.run` with default `Settings()`, `research_store` reads only, never an EDGAR fetch), so the chat
+    always matches the charts. Headline values use the same `ui.pct`/`ui.usd`/`ui.num` formatting as the tiles.
+  - ~10–20 ms per answer once warm. `assistant.warm_up()` loads the model and fills the analysis, risk-report
+    and optimizer caches at start-up, in the **same thread as FinBERT's warm-up** (importing transformers from
+    two threads at once fails with `cannot import name 'AutoModel'`).
+  - `scripts/assistant_check.py` checks intent accuracy on unseen paraphrases (≥ 90%), that headline numbers
+    equal their source, off-topic questions are declined, answers repeat exactly, and latency. Run it after
+    changing intents: `podman exec dashboard .venv/bin/python scripts/assistant_check.py -v`.
+  - To add a question type: write a handler `h_x(q, d)` returning `_ans(...)`, add an `Intent` with 5–8
+    example phrasings, then add paraphrases to the check script.
+  - Portfolio tabs can be deep-linked: `/?tab=overview|factors|idio|risk` (`route()` reads `url.search`).
 - `dashboard/data.py`: reads the portfolio file (flexible column aliases; `CASH` row =
   dollars; negative quantity = short). Prices come from Yahoo's public chart endpoint and
   are cached per ticker as CSV in `data/cache/` for 12 hours.
@@ -138,6 +161,8 @@ the raw file. The file has **prices only, no position sizes**.
 - **Verified:**
   - The file's prices match Yahoo to the cent.
   - Negative 1-year betas for VZ, CB and PM are real; Yahoo gives the same.
+- **Portfolio assistant** (chat bubble, every page) added 2026-10-17: 97% intent accuracy on the check script's
+  145 unseen paraphrases, all headline numbers equal to the dashboard's, ~12 ms median answer.
 - Options and 200-day MA fields (Sheet1) are unused so far. They're a natural input for
   the ML feature.
 

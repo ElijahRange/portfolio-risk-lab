@@ -3,14 +3,11 @@
 The model is downloaded once into data/models and loaded once per web worker, then reused.
 Each sentence gets probabilities for positive / negative / neutral.
 """
-import os
 import threading
 
 from . import config
 
-os.environ.setdefault("HF_HOME", str(config.MODELS_DIR))
-if (config.MODELS_DIR / "hub" / f"models--{config.FINBERT_MODEL.replace('/', '--')}").exists():
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")  # already downloaded: never wait on the network
+config.setup_hugging_face()
 
 _lock = threading.Lock()
 _turn = threading.Condition()

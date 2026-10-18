@@ -30,6 +30,11 @@ def layout():
                     "financial-sentiment model from Hugging Face, runs on LinuxONE and scores the most informative "
                     "sentences and executive quotes as positive, negative or neutral. Key points, guidance and "
                     "'new this quarter' topics (TF-IDF) are picked from those, then stored so pages open instantly."),
+            html.Li("Portfolio assistant (the chat bubble on every page): a small sentence-embedding model from "
+                    "Hugging Face (all-MiniLM-L6-v2) runs on LinuxONE and matches each question to the closest of about "
+                    "30 question types by cosine similarity. Plain code picks out tickers, confidence levels and stress "
+                    "scenarios, and the reply is a template filled with this dashboard's own numbers. No model writes "
+                    "the text, so it can't invent a number and the same question always gets the same answer."),
             html.Li("VaR (95%): the 1-day loss exceeded on only 5% of days in the window. "
                     "CVaR is the average loss on those worst days."),
             html.Li("Risk contribution: each position's share of portfolio variance, using the historical "

@@ -29,6 +29,7 @@ notes in more detail; keep both in sync when you change something important.
 | Ratio Testing | `/ratio-testing` | Optimizer (max Sharpe, min vol, min idio risk, max Sortino, risk parity, max diversification) + efficient frontier with custom weights | `optimizer.py`, `views/ratio_testing.py` |
 | Company Research | `/research` | Any US stock: earnings press releases from SEC EDGAR, scored by **Hugging Face FinBERT running on LinuxONE**; key points, guidance, tone trend, revenue/EPS, quotes, topics | `edgar.py`, `finbert.py`, `research_store.py`, `views/research.py` |
 | Model notes | `/notes` | Plain-English methodology for judges | `views/notes.py` |
+| Portfolio assistant | every page (bottom-right bubble) | Answers simple questions about the portfolio (VaR, beta, weights, stress tests, optimizer, earnings tone…) with the dashboard's own numbers. **Hugging Face MiniLM embeddings on LinuxONE** route the question to an answer template | `assistant.py`, `views/chat.py`, `assets/chat.js` |
 
 **Data:**
 - Prices come from the team's Bloomberg export (VZ, MMM, RELIANCE (converted INR→USD), WMT, TPB,
@@ -57,7 +58,8 @@ python app.py                                     # http://127.0.0.1:8050
   scikit-learn, torch and transformers built for s390x. `requirements-local.txt` adds those for
   laptops. **Don't add or upgrade torch/transformers in `requirements.txt`**; that would replace the
   IBM Z builds on the server.
-- The first Company Research search downloads FinBERT (~440 MB) into `data/models/` (git-ignored).
+- The first Company Research search downloads FinBERT (~440 MB) into `data/models/` (git-ignored); the chat
+  assistant's MiniLM model (~90 MB) downloads there the first time the app starts.
 - Before pushing: open every page you touched, check the browser console and terminal for errors, then
   `git pull --rebase` and push. After pushing, check the live site a minute later.
 - Small, descriptive commits. Don't commit anything under `data/` except `sample_portfolio.csv`.
@@ -84,6 +86,16 @@ commands (logs, restarts, preloading research companies). You don't need SSH for
   - `research_store.ensure(query)` analyses the newest release at once (~8 s for a new company) and
     older ones in a background thread. Results go to SQLite `data/research/edgar.db`, so companies
     already looked up open in under a second.
+- `dashboard/assistant.py` + `views/chat.py`: the portfolio assistant.
+  - It is **deterministic on purpose**: a small Hugging Face embedding model (`all-MiniLM-L6-v2`, ~90 MB, cached
+    in `data/models/`) picks the closest of ~30 intents by cosine similarity; regex code finds tickers, VaR
+    level, scenario and optimizer goal; a template fills in numbers from `service` / `risk_metrics` /
+    `optimizer` / `research_store`. No model writes text, so numbers always match the charts.
+  - The widget is mounted in `app.layout` outside the routed page, so it stays open across pages. The
+    conversation lives in the browser session (`dcc.Store`).
+  - Add a question type: a handler `h_x(q, d)` + an `Intent` with 5–8 example phrasings in `INTENTS`, then add
+    paraphrases to `scripts/assistant_check.py` and run it (accuracy ≥ 90%, numbers equal their source).
+  - Portfolio tabs can be deep-linked with `/?tab=overview|factors|idio|risk`.
 - `dashboard/views/*.py`: each page/tab exposes `layout(...)`.
   - To add a portfolio tab: write a view, then register it in `TABS` in `app.py`.
   - To add a page: add it to `PAGES` and the sidebar `nav_link`s.
@@ -150,6 +162,8 @@ Design language:
   FinBERT). `transformers` is v5: the `summarization` pipeline was removed. Load seq2seq models
   directly if you need them, but small summarisers took about 60 s per paragraph on this 3-core VM.
   Too slow for live use.
+- Load Hugging Face models from **one** thread at start-up: importing `transformers` from two threads at once fails
+  (`cannot import name 'AutoModel'`). `app.py` warms the assistant and FinBERT one after the other.
 - The provided IBM Granite 4.0 350M (base) model and llama.cpp with the z17's NNPA accelerator are in the
   event's Jupyter image (`/home/ibm-user/*.gguf`). It's good at short extraction prompts (~6 s), bad at
   summaries, and slow on long text.

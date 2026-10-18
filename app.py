@@ -3,12 +3,13 @@ import os
 import platform
 import threading
 import time
+from urllib.parse import parse_qs
 
 from dash import ALL, Dash, Input, Output, State, ctx, dcc, html, no_update
 
 from dashboard import components as ui
-from dashboard import config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
-from dashboard.views import factors, idio, notes, overview, ratio_testing, research, risk
+from dashboard import assistant, config, finbert, research_store, service, theme  # noqa: F401  (theme registers the Plotly template)
+from dashboard.views import chat, factors, idio, notes, overview, ratio_testing, research, risk
 
 app = Dash(__name__, title=config.APP_TITLE, update_title=None, suppress_callback_exceptions=True)
 server = app.server
@@ -44,7 +45,7 @@ sidebar = html.Aside([
 ], className="sidebar")
 
 
-def portfolio_page():
+def portfolio_page(tab: str = "overview"):
     return html.Div([
         html.Div([
             html.Div([html.H2("Portfolio", className="page-title"), html.Div(id="source-line", className="muted small")]),
@@ -52,7 +53,7 @@ def portfolio_page():
         ], className="page-head"),
         html.Div(id="alerts"),
         dcc.Tabs(
-            id="tabs", value="overview", className="tabs", parent_className="tabs-parent",
+            id="tabs", value=tab if tab in TABS else "overview", className="tabs", parent_className="tabs-parent",
             children=[dcc.Tab(label=label, value=key, className="tab", selected_className="tab--active")
                       for key, (label, _) in TABS.items()],
         ),
@@ -61,19 +62,22 @@ def portfolio_page():
 
 
 app.layout = html.Div([
-    dcc.Location(id="url"),
-    dcc.Store(id="refreshed-at"),
-    sidebar,
     html.Div([
-        html.Header([html.H1(id="header-title", className="header-title")], className="topbar"),
-        html.Main(id="page", className="page"),
-    ], className="main"),
-], className="shell")
+        dcc.Location(id="url"),
+        dcc.Store(id="refreshed-at"),
+        sidebar,
+        html.Div([
+            html.Header([html.H1(id="header-title", className="header-title")], className="topbar"),
+            html.Main(id="page", className="page"),
+        ], className="main"),
+    ], className="shell"),
+    chat.layout(),  # outside the routed page, so the assistant stays open across pages and tabs
+])
 
 
 @app.callback(Output("page", "children"), Output("header-title", "children"),
               *[Output(nav_id, "className") for nav_id in NAV_IDS.values()],
-              Input("url", "pathname"), State("url", "search"))
+              Input("url", "pathname"), Input("url", "search"))
 def route(pathname, search):
     pathname = pathname if pathname in PAGES else "/"
     active = ["nav-link active" if p == pathname else "nav-link" for p in PAGES]
@@ -86,8 +90,8 @@ def route(pathname, search):
             page = ratio_testing.layout(service.current_analysis())
         except Exception as exc:
             page = ui.alert("Could not load the portfolio", f"{type(exc).__name__}: {exc}", "error")
-    else:
-        page = portfolio_page()
+    else:  # /?tab=risk opens a portfolio tab directly (the assistant's links use this)
+        page = portfolio_page(parse_qs((search or "").lstrip("?")).get("tab", ["overview"])[0])
     return page, PAGES[pathname], *active
 
 
@@ -198,10 +202,6 @@ def reset_custom_weights(_, ids):
 
 # ---------- Company Research page ----------
 
-# Load FinBERT while the worker starts, so the first search doesn't wait for it.
-threading.Thread(target=finbert.warm_up, daemon=True).start()
-
-
 @app.callback(Output("rs-status", "children"), Output("rs-fetched", "data"),
               Input("rs-go", "n_clicks"), Input("rs-search", "n_submit"), State("rs-search", "value"),
               prevent_initial_call=True)
@@ -258,6 +258,77 @@ def research_body(selected):
         return research.body(selected), not (symbol and research_store.pending_count(symbol))
     except Exception as exc:
         return ui.alert("Could not open the research page", f"{type(exc).__name__}: {exc}", "error"), True
+
+
+# ---------- Portfolio assistant (chat bubble on every page) ----------
+
+
+
+def _warm_up_models():
+    assistant.warm_up()  # sentence-embedding model + example questions + data caches
+    finbert.warm_up()
+
+
+# Load both Hugging Face models while the worker starts, so neither the first chat question nor the first research
+# search waits. One thread on purpose: importing transformers from two threads at once fails.
+threading.Thread(target=_warm_up_models, daemon=True).start()
+
+
+@app.callback(Output("chat-log", "data"), Output("chat-input", "value"),
+              Input("chat-send", "n_clicks"), Input("chat-input", "n_submit"),
+              Input({"type": "chat-chip", "index": ALL}, "n_clicks"), Input("chat-clear", "n_clicks"),
+              State({"type": "chat-chip", "index": ALL}, "children"), State("chat-input", "value"),
+              State("chat-log", "data"), prevent_initial_call=True)
+def chat_ask(_send, _submit, _chips, _clear, chip_texts, text, log):
+    trig = ctx.triggered_id
+    if trig == "chat-clear":
+        return [], ""
+    if isinstance(trig, dict):
+        if not ctx.triggered[0]["value"]:
+            return no_update, no_update  # the chips were re-rendered, not clicked
+        text, new_input = chip_texts[trig["index"]], no_update  # a chip: leave anything typed in the box
+    elif text and text.strip():
+        new_input = ""
+    else:
+        return no_update, no_update
+    reply = assistant.answer(text)  # never raises: errors come back as a polite answer
+    log = (log or []) + [{"role": "user", "text": text.strip()[:300]}, {"role": "bot", **reply}]
+    return log[-config.ASSISTANT_HISTORY:], new_input
+
+
+@app.callback(Output("chat-messages", "children"), Output("chat-chips", "children"), Input("chat-log", "data"))
+def chat_render(log):
+    return chat.render(log)
+
+
+app.clientside_callback(
+    "function(_open, _close, isOpen) { return !isOpen; }",
+    Output("chat-open", "data"), Input("chat-launcher", "n_clicks"), Input("chat-close", "n_clicks"),
+    State("chat-open", "data"), prevent_initial_call=True)
+
+app.clientside_callback(
+    """function(isOpen) {
+        if (isOpen && window.innerWidth > 760) {
+            setTimeout(function () { var el = document.getElementById('chat-input'); if (el) { el.focus(); } }, 80);
+        }
+        var open = isOpen ? ' open' : '';
+        return ['chat-panel' + open, 'chat-launcher' + open];
+    }""",
+    Output("chat-panel", "className"), Output("chat-launcher", "className"), Input("chat-open", "data"))
+
+# Scroll so the newest question sits at the top of the list, with its answer right below it.
+app.clientside_callback(
+    """function() {
+        setTimeout(function () {
+            var box = document.getElementById('chat-messages');
+            if (!box) { return; }
+            var asked = box.querySelectorAll('.chat-msg.user');
+            var last = asked[asked.length - 1];
+            box.scrollTop = last ? last.offsetTop - 8 : 0;
+        }, 30);
+        return Date.now();
+    }""",
+    Output("chat-scroll", "data"), Input("chat-messages", "children"), Input("chat-open", "data"))
 
 
 if __name__ == "__main__":

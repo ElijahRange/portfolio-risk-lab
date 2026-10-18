@@ -79,6 +79,21 @@ RESEARCH_KEY_POINTS = 8
 RESEARCH_REFRESH_HOURS = 24   # re-check EDGAR for new releases after this long
 SEC_MIN_INTERVAL = 0.12       # seconds between SEC requests (SEC allows 10 per second)
 
+# Portfolio assistant (chat bubble on every page): a small Hugging Face sentence-embedding model, run locally
+# like FinBERT, matches each question to an answer template filled with the dashboard's own numbers.
+ASSISTANT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"   # ~90 MB, ~10 ms per question on 3 cores
+ASSISTANT_THRESHOLD = 0.5     # below this similarity the assistant lists what it can answer instead of guessing
+ASSISTANT_HISTORY = 40        # chat messages kept in the browser session
+
+HF_MODELS = (FINBERT_MODEL, ASSISTANT_MODEL)
+
+
+def setup_hugging_face() -> None:
+    """Keep Hugging Face models in data/models; go offline once every model is downloaded (never wait on the network)."""
+    os.environ.setdefault("HF_HOME", str(MODELS_DIR))
+    if all((MODELS_DIR / "hub" / f"models--{m.replace('/', '--')}").exists() for m in HF_MODELS):
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 
 def _env_file_value(name: str) -> str | None:
     """A variable from the environment, or from .env (read live, so no restart is needed)."""
